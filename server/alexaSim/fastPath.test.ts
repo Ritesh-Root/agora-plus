@@ -1,10 +1,15 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fastPathEnabled, routeFast } from './fastPath';
 
 const none = {};
 
+const savedZone = process.env.AGORA_TIMEZONE;
+
 afterEach(() => {
   delete process.env.ALEXA_SIM_FAST_PATH;
+  vi.useRealTimers();
+  if (savedZone === undefined) delete process.env.AGORA_TIMEZONE;
+  else process.env.AGORA_TIMEZONE = savedZone;
 });
 
 describe('routeFast', () => {
@@ -66,6 +71,52 @@ describe('routeFast', () => {
       tool: 'complete_task',
       args: { taskIdOrTitle: 'Milk' },
     });
+    expect(routeFast('add milk to my shopping list', none)).toEqual({
+      tool: 'add_task',
+      args: { title: 'milk', list: 'shopping' },
+    });
+    expect(routeFast('add milk to the shopping list', none)).toEqual({
+      tool: 'add_task',
+      args: { title: 'milk', list: 'shopping' },
+    });
+    expect(routeFast('put eggs on the grocery list', none)).toEqual({
+      tool: 'add_task',
+      args: { title: 'eggs', list: 'shopping' },
+    });
+    expect(routeFast("what's on my shopping list?", none)).toEqual({
+      tool: 'list_tasks',
+      args: { list: 'shopping' },
+    });
+  });
+
+  it('answers a memory question without leaving the fast path', () => {
+    expect(routeFast('what is Mia allergic to?', none)).toEqual({
+      tool: 'recall',
+      args: { query: 'what is Mia allergic to' },
+    });
+    expect(routeFast('what do you know about Mia?', none)).toEqual({
+      tool: 'recall',
+      args: { query: 'what do you know about Mia' },
+    });
+    expect(routeFast('what does Jen like?', none)).toEqual({
+      tool: 'recall',
+      args: { query: 'what does Jen like' },
+    });
+    expect(routeFast('what is the weather?', none)).toBeNull();
+  });
+
+  it('sets a reminder time in the household zone', () => {
+    process.env.AGORA_TIMEZONE = 'America/Los_Angeles';
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-08T20:00:00.000Z'));
+    expect(routeFast('remind me to call Grandma at 6pm', none)).toEqual({
+      tool: 'add_task',
+      args: { title: 'call Grandma', due: 'at 6pm', dueAt: '2026-10-08T18:00:00-07:00' },
+    });
+    expect(routeFast('remind me in 10 minutes to check the oven', none)).toEqual({
+      tool: 'add_task',
+      args: { title: 'check the oven', due: 'in 10 minutes', dueAt: '2026-10-08T13:10:00-07:00' },
+    });
   });
 
   it('sends a plan through with the whole utterance', () => {
@@ -112,7 +163,6 @@ describe('routeFast', () => {
 
   it('leaves compounds and open questions for the model', () => {
     expect(routeFast('remember the allergy and add milk to my list', none)).toBeNull();
-    expect(routeFast('what is Mia allergic to?', none)).toBeNull();
     expect(routeFast('tell me a joke', none)).toBeNull();
     expect(routeFast('please remember the keys', none)).toBeNull();
     expect(routeFast('plan is done', none)).toBeNull();

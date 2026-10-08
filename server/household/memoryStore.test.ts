@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { addMemory, listMemory, memoryMarkdown, removeMemory, searchMemory, updateMemory } from './memoryStore';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { addMemory, listMemory, memoryMarkdown, removeMemory, searchMemory, speakRecall, updateMemory } from './memoryStore';
 import { setDataDir } from './store';
 
 let dir = '';
@@ -39,5 +39,117 @@ describe('memoryStore', () => {
     expect(await removeMemory(second.id)).not.toBeNull();
     expect(await listMemory()).toHaveLength(1);
     expect(await removeMemory(second.id)).toBeNull();
+  });
+
+  it('infers who from a leading name and keeps a file that has no who', async () => {
+    const saved = await addMemory('Mia is allergic to peanuts', ['allergy'], 'voice');
+    expect(saved.who).toBe('Mia');
+    expect((await addMemory('The spare key is in the drawer', [], 'ui')).who).toBeUndefined();
+    expect((await addMemory('Jen likes tea', [], 'ui', 'Dad')).who).toBe('Dad');
+
+    await writeFile(path.join(dir, 'memory.json'), JSON.stringify([{
+      id: 'old',
+      text: 'Bins go out Tuesday',
+      tags: ['home'],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      source: 'ui',
+    }]));
+    const loaded = await listMemory();
+    expect(loaded.map((entry) => entry.text)).toEqual(['Bins go out Tuesday']);
+    expect(loaded[0]?.who).toBeUndefined();
+  });
+
+  it('updates the same fact instead of storing a copy', async () => {
+    const first = await addMemory('Mia is allergic to peanuts', ['allergy'], 'voice');
+    const second = await addMemory('  mia   is allergic to peanuts. ', ['mia'], 'ui');
+    expect(second.id).toBe(first.id);
+    expect(second.who).toBe('Mia');
+    expect(second.tags).toEqual(['allergy', 'mia']);
+    expect(await listMemory()).toHaveLength(1);
+    const markdown = await memoryMarkdown();
+    expect(markdown).toContain('Mia: Mia is allergic to peanuts');
+  });
+
+  it('moves a corrupt or wrong-shape memory file aside and still saves the next fact', async () => {
+    await writeFile(path.join(dir, 'memory.json'), '{');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await listMemory()).toEqual([]);
+    expect(await listMemory()).toEqual([]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    const names = await readdir(dir);
+    const aside = names.find((name) => name.startsWith('memory.json.corrupt-') && name.endsWith('.json'));
+    expect(aside).toBeTruthy();
+    expect(await readFile(path.join(dir, aside ?? ''), 'utf8')).toBe('{');
+
+    const saved = await addMemory('Mia is allergic to peanuts', [], 'ui');
+    expect(saved.who).toBe('Mia');
+    const fresh = JSON.parse(await readFile(path.join(dir, 'memory.json'), 'utf8')) as unknown[];
+    expect(fresh).toHaveLength(1);
+    expect(await readFile(path.join(dir, aside ?? ''), 'utf8')).toBe('{');
+    errors.mockRestore();
+  });
+
+  it('moves a JSON object aside instead of treating it as an empty list', async () => {
+    await writeFile(path.join(dir, 'memory.json'), '{"entries":[]}');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await listMemory()).toEqual([]);
+    const names = await readdir(dir);
+    expect(names.some((name) => name.includes('.corrupt-'))).toBe(true);
+    expect(names.includes('memory.json')).toBe(false);
+    errors.mockRestore();
+  });
+});
+
+describe('speakRecall', () => {
+  const mia = {
+    id: 'mia',
+    text: 'Mia is allergic to peanuts',
+    tags: ['allergy'],
+    createdAt: '2026-10-08T00:00:00.000Z',
+    updatedAt: '2026-10-08T00:00:00.000Z',
+    source: 'voice' as const,
+    who: 'Mia',
+  };
+  const shellfish = {
+    ...mia,
+    id: 'shell',
+    text: 'Mia is allergic to shellfish',
+    createdAt: '2026-10-08T01:00:00.000Z',
+  };
+  const jen = {
+    ...mia,
+    id: 'jen',
+    text: 'Jen goes to North School',
+    tags: ['school'],
+    who: 'Jen',
+    createdAt: '2026-10-08T02:00:00.000Z',
+  };
+  const lincoln = {
+    ...mia,
+    id: 'lincoln',
+    text: 'Mia goes to Lincoln',
+    tags: ['school'],
+    createdAt: '2026-10-08T03:00:00.000Z',
+  };
+
+  it('says both facts when they match equally', () => {
+    const spoken = speakRecall('allergic', [shellfish, mia]);
+    expect(spoken.speech).toContain('peanuts');
+    expect(spoken.speech).toContain('shellfish');
+    expect(spoken.speech).not.toContain("I'm not sure");
+  });
+
+  it('prefers the named person and does not sound sure about a partial match', () => {
+    const spoken = speakRecall('what school does Mia go to', [jen, lincoln]);
+    expect(spoken.speech).toContain('Lincoln');
+    expect(spoken.speech).not.toContain('North');
+    expect(spoken.speech).toContain("I'm not sure");
+  });
+
+  it('marks a weak keyword overlap as unsure', () => {
+    const spoken = speakRecall('peanuts school', [mia, jen]);
+    expect(spoken.speech).toContain("I'm not sure, but I have:");
+    expect(spoken.speech).toContain('peanuts');
   });
 });
