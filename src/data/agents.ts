@@ -23,7 +23,8 @@ export function toRenderIndex(agentLogicalIndex: number): number {
 export function toLogicalIndex(renderIndex: number): number {
   return renderIndex - MAX_PLAYERS + 1;
 }
-export const DEFAULT_AGENTIC_SET_ID = 'single-agent';
+/** Household is the office the demo opens. Names match server/household/team.ts. */
+export const DEFAULT_AGENTIC_SET_ID = 'household';
 export interface AgentSkill {
   id: string;
   name: string;
@@ -82,6 +83,57 @@ export interface AgenticSystem {
 }
 
 export const AGENTIC_SETS: AgenticSystem[] = [
+  {
+    id: 'household',
+    teamName: 'Household',
+    teamType: 'Home',
+    teamDescription: 'Agora leads Scout, Planner, and Keeper. They research, schedule, and check the plan against what the household remembers.',
+    color: '#6366C9',
+    outputType: 'text',
+    outputModel: DEFAULT_MODELS.text,
+    outputAutoApprove: true,
+    user: { index: 0, model: 'Human', position: { x: 0, y: 0 } },
+    leadAgent: {
+      id: 'household-agora',
+      index: 1,
+      name: 'Agora',
+      description: 'Household lead. Decomposes the request into tasks and writes the final plan in plain language.',
+      color: '#6366C9',
+      model: DEFAULT_MODELS.text,
+      position: { x: 0, y: 130 },
+      subagents: [
+        {
+          id: 'household-scout',
+          index: 2,
+          name: 'Scout',
+          description: 'Researches facts, prices, and options, and cites sources.',
+          color: '#0F766E',
+          model: DEFAULT_MODELS.text,
+          skillIds: ['web-research'],
+          position: { x: -300, y: 280 },
+        },
+        {
+          id: 'household-planner',
+          index: 3,
+          name: 'Planner',
+          description: 'Handles schedules, logistics, budgets, and shopping lists.',
+          color: '#C2410C',
+          model: DEFAULT_MODELS.text,
+          position: { x: 0, y: 280 },
+        },
+        {
+          id: 'household-keeper',
+          index: 4,
+          name: 'Keeper',
+          description: 'Checks every plan against household memory (allergies, preferences, routines) and flags conflicts explicitly.',
+          color: '#BE185D',
+          model: DEFAULT_MODELS.text,
+          skillIds: ['fact-checker'],
+          position: { x: 300, y: 280 },
+        },
+      ],
+    },
+  },
   {
     id: 'creative-studio',
     teamName: 'Creative Studio',
@@ -489,6 +541,7 @@ export function getAgentSet(id: string, customSystems: AgenticSystem[] = []): Ag
   const system = (
     customSystems.find((s) => s.id === id) ||
     AGENTIC_SETS.find((s) => s.id === id) ||
+    AGENTIC_SETS.find((s) => s.id === DEFAULT_AGENTIC_SET_ID) ||
     AGENTIC_SETS[0]
   );
 
@@ -497,6 +550,27 @@ export function getAgentSet(id: string, customSystems: AgenticSystem[] = []): Ag
     outputType: 'text',
     outputModel: DEFAULT_MODELS.text,
   };
+}
+
+/**
+ * Character index for a society role. An exact name wins. A role that merely
+ * names someone ("Keeper on allergies") still hits that character. Anything
+ * else is spread across the set so unknown roles do not all become the lead.
+ */
+export function agentIndexForRole(role: string | undefined, agents: { name: string; index: number }[]): number {
+  if (agents.length === 0) return 0;
+  const named = role?.trim().toLowerCase() ?? '';
+  if (!named) return agents[0].index;
+  const exact = agents.find((agent) => agent.name.toLowerCase() === named);
+  if (exact) return exact.index;
+  const mentioned = agents.find((agent) => named.includes(agent.name.toLowerCase()));
+  if (mentioned) return mentioned.index;
+  let hash = 2166136261;
+  for (let i = 0; i < named.length; i += 1) {
+    hash ^= named.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return agents[(hash >>> 0) % agents.length].index;
 }
 
 export function getAllAgents(system: AgenticSystem): AgentNode[] {

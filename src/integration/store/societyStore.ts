@@ -75,6 +75,7 @@ interface SocietyState {
     synthesis: string;
     wordCount?: number;
     revisionLabel?: string;
+    spokenSummary?: string;
   }) => void;
   updateTask: (taskId: string, update: Partial<SocietyTask>) => void;
   addNegotiationTurn: (topic: string, turn: NegotiationRound) => void;
@@ -138,8 +139,16 @@ export const useSocietyStore = create<SocietyState>((set) => ({
       output: task.output,
       attempt: task.attempt,
     })),
-    result: run.synthesis
-      ? { brief: run.brief, synthesis: run.synthesis, wordCount: run.wordCount, revisionLabel: run.revisionLabel, tasks: run.tasks, metrics: {} }
+    result: run.synthesis || run.spokenSummary
+      ? {
+          brief: run.brief,
+          synthesis: run.synthesis,
+          wordCount: run.wordCount,
+          revisionLabel: run.revisionLabel,
+          spokenSummary: run.spokenSummary,
+          tasks: run.tasks,
+          metrics: {},
+        }
       : null,
     error: null,
     isSocietyPanelOpen: true,
@@ -222,13 +231,15 @@ export const useSocietyStore = create<SocietyState>((set) => ({
       attempt: t.attempts,
     }));
 
+    const saveError = typeof result.error === 'string' && result.error.trim() ? result.error.trim() : null;
     return {
       isRunning: false,
       stage: null,
-      runStatus: result.revisionLabel ? 'needs_revision' : 'complete',
+      runStatus: saveError || result.revisionLabel ? 'needs_revision' : 'complete',
       result,
       tasks: nextTasks,
       negotiation: nextNeg,
+      error: saveError,
       isSocietyPanelOpen: true,
     };
   }),

@@ -69,6 +69,10 @@ export interface SocietyResultWire {
   wordCount?: number;
   /** Present when the draft is kept but is not a successful completion. */
   revisionLabel?: string;
+  /** Spoken line for a finished household run. The office shows this when it is set. */
+  spokenSummary?: string;
+  /** Set when the finished run could not be saved. */
+  error?: string;
   negotiation?: {
     topic: string;
     rounds: number;
@@ -132,7 +136,7 @@ export type ServerMessage =
   | { type: 'society-negotiation'; topic: string; round: number; agent: string; argument: string; scores?: Array<{ agent: string; score: number; reason: string }> }
   | { type: 'society-stage'; stage: 'debating' | 'assembling' | 'repairing' }
   | { type: 'society-run-status'; runId: string; status: 'cancel_requested' | 'stopped' }
-  | { type: 'society-snapshot'; run: { runId: string; brief: string; status: 'running' | 'cancel_requested' | 'stopped' | 'complete' | 'needs_revision'; stage: 'planning' | 'working' | 'debating' | 'assembling' | 'repairing' | null; tasks: Array<{ id: string; title: string; role: string; status: 'pending' | 'running' | 'done' | 'healing' | 'escalated'; output?: string; attempt?: number }>; synthesis: string; wordCount?: number; revisionLabel?: string } }
+  | { type: 'society-snapshot'; run: { runId: string; brief: string; status: 'running' | 'cancel_requested' | 'stopped' | 'complete' | 'needs_revision'; stage: 'planning' | 'working' | 'debating' | 'assembling' | 'repairing' | null; tasks: Array<{ id: string; title: string; role: string; status: 'pending' | 'running' | 'done' | 'healing' | 'escalated'; output?: string; attempt?: number }>; synthesis: string; wordCount?: number; revisionLabel?: string; spokenSummary?: string } }
   | { type: 'society-complete'; result: SocietyResultWire }
   | { type: 'society-error'; error: string }
   | { type: 'room-chat'; message: RoomChatMessage }
