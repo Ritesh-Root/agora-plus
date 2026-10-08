@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { recognitionError } from './micErrors';
 
 interface SpeechControls {
   supported: boolean;
@@ -8,16 +9,33 @@ interface SpeechControls {
   stop: () => void;
 }
 
-/** Push-to-talk. Interim words stay on screen until the phrase is final. */
-export function useSpeechInput(onFinal: (text: string) => void): SpeechControls {
+/** Push-to-talk. Interim words stay on screen until the phrase is released. */
+export function useSpeechInput(
+  onFinal: (text: string) => void,
+  onError?: (message: string) => void,
+): SpeechControls {
   const onFinalRef = useRef(onFinal);
   onFinalRef.current = onFinal;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
   const recognition = useRef<SpeechRecognition | null>(null);
   const finalText = useRef('');
+  const liveText = useRef('');
+  const errorNote = useRef<string | null>(null);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
   const supported = typeof window !== 'undefined'
     && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const stop = useCallback(() => {
+    recognition.current?.stop();
+  }, []);
+
+  useEffect(() => {
+    const onBlur = () => stop();
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, [stop]);
 
   const start = useCallback(() => {
     const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -27,6 +45,8 @@ export function useSpeechInput(onFinal: (text: string) => void): SpeechControls 
     rec.interimResults = true;
     rec.continuous = true;
     finalText.current = '';
+    liveText.current = '';
+    errorNote.current = null;
     rec.onresult = (event) => {
       let spoken = finalText.current;
       let live = '';
@@ -36,18 +56,28 @@ export function useSpeechInput(onFinal: (text: string) => void): SpeechControls 
         else live += piece;
       }
       finalText.current = spoken;
-      setInterim(`${spoken}${live}`.trim());
+      liveText.current = `${spoken}${live}`.trim();
+      setInterim(liveText.current);
     };
-    rec.onerror = () => {
+    rec.onerror = (event) => {
+      const message = recognitionError(event.error);
+      if (message) {
+        errorNote.current = message;
+        onErrorRef.current?.(message);
+      }
       setListening(false);
     };
     rec.onend = () => {
       recognition.current = null;
       setListening(false);
-      const text = finalText.current.trim();
+      const blocked = errorNote.current;
+      const text = (liveText.current || finalText.current).trim();
       finalText.current = '';
+      liveText.current = '';
+      errorNote.current = null;
       setInterim('');
-      if (text) onFinalRef.current(text);
+      if (blocked || !text) return;
+      onFinalRef.current(text);
     };
     recognition.current = rec;
     setListening(true);
@@ -58,10 +88,6 @@ export function useSpeechInput(onFinal: (text: string) => void): SpeechControls 
       recognition.current = null;
       setListening(false);
     }
-  }, []);
-
-  const stop = useCallback(() => {
-    recognition.current?.stop();
   }, []);
 
   return { supported, listening, interim, start, stop };

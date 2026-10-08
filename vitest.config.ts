@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 // in a Node environment without the React/Tailwind/relay dev pipeline.
 export default defineConfig({
   test: {
-    include: ['src/core/society/**/*.test.ts', 'src/core/llm/**/*.test.ts', 'src/simulation/**/*.test.ts', 'src/replay/**/*.test.ts', 'server/**/*.test.ts'],
+    include: ['src/core/society/**/*.test.ts', 'src/core/llm/**/*.test.ts', 'src/simulation/**/*.test.ts', 'src/replay/**/*.test.ts', 'src/alexa/**/*.test.ts', 'src/interface/**/*.test.ts', 'server/**/*.test.ts'],
     environment: 'node',
   },
 });

@@ -1,32 +1,42 @@
 import { useCallback, useRef } from 'react';
 
-interface QueuedSpeech {
-  text: string;
+export interface SpeechHooks {
+  /** Fires only when audio actually starts (`onstart` / `playing`). */
   onStart?: () => void;
+  /** Fires when this line finishes. `played` is false when nothing was heard. */
+  onDone?: (played: boolean) => void;
 }
 
-function browserSpeak(text: string, token: number, generation: () => number, onStart?: () => void): Promise<void> {
+interface QueuedSpeech {
+  text: string;
+  hooks?: SpeechHooks;
+}
+
+function browserSpeak(text: string, token: number, generation: () => number, onStart?: () => void): Promise<boolean> {
   return new Promise((resolve) => {
     const synth = window.speechSynthesis;
     if (!synth) {
-      onStart?.();
-      resolve();
+      resolve(false);
       return;
     }
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
-    const cap = window.setTimeout(() => resolve(), Math.min(15000, 2000 + text.length * 60));
+    let played = false;
+    let settled = false;
+    const finish = (heard: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(cap);
+      resolve(heard);
+    };
+    const cap = window.setTimeout(() => finish(played), Math.min(15000, 2000 + text.length * 60));
     utterance.onstart = () => {
-      if (generation() === token) onStart?.();
+      if (generation() !== token) return;
+      played = true;
+      onStart?.();
     };
-    utterance.onend = () => {
-      window.clearTimeout(cap);
-      resolve();
-    };
-    utterance.onerror = () => {
-      window.clearTimeout(cap);
-      resolve();
-    };
+    utterance.onend = () => finish(played);
+    utterance.onerror = () => finish(played);
     synth.speak(utterance);
   });
 }
@@ -37,40 +47,50 @@ async function playPolly(
   generation: () => number,
   audioRef: { current: HTMLAudioElement | null },
   onStart?: () => void,
-): Promise<void> {
+): Promise<boolean> {
   const response = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
-  if (generation() !== token) return;
+  if (generation() !== token) return false;
   if (!response.ok) throw new Error('tts');
   const blob = await response.blob();
-  if (generation() !== token) return;
+  if (generation() !== token) return false;
   const url = URL.createObjectURL(blob);
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<boolean>((resolve, reject) => {
     const audio = new Audio(url);
     audioRef.current = audio;
-    const finish = (failed: boolean) => {
+    let played = false;
+    let settled = false;
+    const finish = (heard: boolean, fallback: boolean) => {
+      if (settled) return;
+      settled = true;
       URL.revokeObjectURL(url);
       if (audioRef.current === audio) audioRef.current = null;
-      if (failed) reject(new Error('audio'));
-      else resolve();
+      if (fallback) reject(new Error('audio'));
+      else resolve(heard);
     };
     audio.onplaying = () => {
-      if (generation() === token) onStart?.();
+      if (generation() !== token) return;
+      if (audio.muted || audio.volume === 0) return;
+      played = true;
+      onStart?.();
     };
-    audio.onended = () => finish(false);
-    audio.onerror = () => finish(true);
+    audio.onended = () => finish(played, false);
+    audio.onerror = () => finish(played, !played);
     audio.onpause = () => {
-      if (generation() !== token) finish(false);
+      if (generation() !== token) finish(played, false);
     };
-    void audio.play().catch(() => finish(true));
+    void audio.play().catch(() => finish(played, !played));
   });
 }
 
 /** Speaks one line at a time. A new turn calls stop() so nothing overlaps. */
-export function useSpeechOutput(onActive: (active: boolean) => void): { speak: (text: string, onStart?: () => void) => void; stop: () => void } {
+export function useSpeechOutput(onActive: (active: boolean) => void): {
+  speak: (text: string, hooks?: SpeechHooks) => void;
+  stop: () => void;
+} {
   const onActiveRef = useRef(onActive);
   onActiveRef.current = onActive;
   const queue = useRef<QueuedSpeech[]>([]);
@@ -101,33 +121,36 @@ export function useSpeechOutput(onActive: (active: boolean) => void): { speak: (
       while (queue.current.length > 0 && generation.current === token) {
         const item = queue.current.shift();
         if (!item) break;
+        let played = false;
         try {
-          await playPolly(item.text, token, () => generation.current, audioRef, () => {
+          played = await playPolly(item.text, token, () => generation.current, audioRef, () => {
             setActive(true);
-            item.onStart?.();
+            item.hooks?.onStart?.();
           });
         } catch {
           if (generation.current !== token) break;
-          await browserSpeak(item.text, token, () => generation.current, () => {
+          played = await browserSpeak(item.text, token, () => generation.current, () => {
             setActive(true);
-            item.onStart?.();
+            item.hooks?.onStart?.();
           });
         }
+        if (generation.current !== token) break;
+        item.hooks?.onDone?.(played);
       }
     } finally {
       draining.current = false;
-      if (queue.current.length > 0) void drain();
+      if (queue.current.length > 0 && generation.current === token) void drain();
       else if (generation.current === token) setActive(false);
     }
   }, [setActive]);
 
-  const speak = useCallback((text: string, onStart?: () => void) => {
+  const speak = useCallback((text: string, hooks?: SpeechHooks) => {
     const trimmed = text.trim();
     if (!trimmed) {
-      onStart?.();
+      hooks?.onDone?.(false);
       return;
     }
-    queue.current.push({ text: trimmed, onStart });
+    queue.current.push({ text: trimmed, hooks });
     void drain();
   }, [drain]);
 

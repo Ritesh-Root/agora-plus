@@ -21,7 +21,7 @@ function cardCandidates(): string[] {
 async function sourceMtime(): Promise<number> {
   const dir = join(process.cwd(), 'server', 'mcp', 'apps');
   let newest = 0;
-  for (const name of ['householdCard.ts', 'householdCard.html', 'buildCard.ts']) {
+  for (const name of ['householdCard.ts', 'householdCardState.ts', 'householdCard.html', 'buildCard.ts']) {
     try {
       const info = await stat(join(dir, name));
       if (info.mtimeMs > newest) newest = info.mtimeMs;

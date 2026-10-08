@@ -10,6 +10,7 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 
 if (window.location.pathname.startsWith('/alexa')) {
+  document.title = 'AGORA+ voice (unofficial Alexa+ simulator)';
   const AlexaSimulator = lazy(() => import('./alexa/AlexaSimulator'));
   root.render(
     <Suspense fallback={null}>
