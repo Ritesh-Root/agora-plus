@@ -1,6 +1,6 @@
 # Firecrawl friction (phase 0b)
 
-Research-only notes. The shared rules asked for friction in `docs/FRICTION_LOG.md`; that file is owned by another phase, so this copy lives here.
+Research-only notes from 8 Oct 2026. The same eight items are the last rows of [docs/FRICTION_LOG.md](../FRICTION_LOG.md), which is the Devpost log. This file stays so the research pass still has its own copy.
 
 ## 1. Reddit pages cannot be scraped
 

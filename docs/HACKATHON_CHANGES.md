@@ -86,3 +86,15 @@ An agent can now follow `skills/agora-household/SKILL.md` to use the household M
 The card shows the briefing lines, each open task with a Done button, and each waiting approval with Approve and Decline. Done calls `complete_task`. Approve and Decline call `approve_action`. Text is at least 18px and the buttons are at least 48px tall. If the host sends a light or dark theme, the card follows it. Otherwise it uses AGORA's ink, paper, and butter colors. There is no external font or script.
 
 The production bundle was started on port 8099 and then stopped. `POST /mcp` with `{}` and no token returned `401` with an empty body and no `WWW-Authenticate` header. `GET /alexa` returned HTML. `resources/read` of the card URI returned HTML (`text/html;profile=mcp-app`) that includes the view script. The MCP Inspector was not opened. In Chromium, a small stand-in host loaded the same HTML: the page used the dark theme, body text was 18px, the Done button was about 54px tall, and Decline called `approve_action`.
+
+### 2026-10-08 — Phase 6: Submission package
+
+The README now opens as AGORA+. Judges can read [docs/ARCHITECTURE.md](ARCHITECTURE.md), [docs/AWS.md](AWS.md), [docs/FEEDBACK.md](FEEDBACK.md), [docs/DEMO_SCRIPT.md](DEMO_SCRIPT.md), and the copy-ready Devpost fields in [docs/SUBMISSION.md](SUBMISSION.md). The friction log is in the Devpost column layout, and the eight Firecrawl research notes are rows at the bottom. [server/docs.test.ts](../server/docs.test.ts) checks that relative links in `README.md` and `docs/*.md` point at files in the tree.
+
+`git diff --stat pre-window..HEAD` at commit `42a83b6` (the phase 5b commit, before this write-up): 228 files changed, 22141 insertions, 2294 deletions. The range is 25 commits, all dated 2026-09-23 through 2026-10-08. The tag `pre-window` is `4f61371` on 2026-08-20. These submission files sit on top of that diff until this phase is committed.
+
+`git ls-files` with the secret-filename pattern matched only `.env.example`. [LICENSE](../LICENSE) is the MIT license.
+
+Operator measurements for the demo, local fast path, no AWS: 55–58 ms to the first acknowledgement, about 100 ms for a full remember turn, about 800 ms for "plan dinners" to reach the approval card. Model-path and Polly numbers are still `TODO(measure)`.
+
+`npm run lint`, `npm run lint:server`, `npm test` (41 files, 155 tests), and `npm run build` passed. `npm run test:e2e` passed on Chromium and Firefox. WebKit is omitted on this host because `ldd` cannot find the MiniBrowser libraries; the config still includes WebKit when that check is clean.
