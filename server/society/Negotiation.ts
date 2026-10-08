@@ -1,5 +1,5 @@
 /**
- * Negotiation / Referee — AGORA's conflict-resolution layer (Track-3 differentiator).
+ * Negotiation / Referee — AGORA's conflict-resolution layer.
  *
  * When agents hold competing positions, a Referee runs a structured debate:
  * debaters argue, the Referee scores each position against a rubric, debaters
@@ -24,6 +24,8 @@ export interface NegotiationLLM {
 export interface Position {
   agent: string;
   stance: string;
+  /** Team member name used to pick that member's model connection. The visible name stays `agent`. */
+  route?: string;
 }
 
 export interface DebateTurn {
@@ -130,7 +132,7 @@ async function debaterArgument(
     ? `\nThe Referee's critique of your last argument: ${critique}\nStrengthen your case and address it.`
     : '';
   const user = `Topic: ${topic}\nYour stance: ${pos.stance}${opponentText}${critiqueText}`;
-  markDebate(provider, pos.agent, round);
+  markDebate(provider, pos.route || pos.agent, round);
   const res = await provider.generateCompletion([{ role: 'user', content: user }], undefined, system, model);
   return (res.content ?? '').trim() || `(no argument from ${pos.agent})`;
 }

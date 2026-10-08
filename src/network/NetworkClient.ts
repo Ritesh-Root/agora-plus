@@ -5,6 +5,7 @@ import { useCoreStore } from '../integration/store/coreStore';
 import { useRoomChatStore } from './roomChatStore';
 import { useDecisionStore } from '../interface/decisionStore';
 import { useUiStore } from '../integration/store/uiStore';
+import { wireAgent } from '../core/llm/connections';
 import { getAllAgents } from '../data/agents';
 import { getActiveAgentSet } from '../integration/store/teamStore';
 
@@ -386,15 +387,8 @@ export function startSwarm(brief: string): void {
     return;
   }
   const config = useUiStore.getState().llmConfig;
-  const selectedModel = config.model?.trim();
-  const agents = getAllAgents(getActiveAgentSet()).map((agent) => {
-    const override = agent.model?.trim();
-    return {
-      name: agent.name,
-      description: agent.description,
-      model: override && override !== selectedModel ? override : undefined,
-    };
-  });
+  const file = useUiStore.getState().connections;
+  const agents = getAllAgents(getActiveAgentSet()).map((agent) => wireAgent(agent, file));
   useCoreStore.getState().startProject(brief);
   useSocietyStore.getState().startSociety(brief);
   const sent = networkClient.send({

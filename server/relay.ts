@@ -5,23 +5,42 @@ import type { WebSocket as WsSocket } from 'ws';
 import type { Plugin, ViteDevServer } from 'vite';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
-import { parseRoomMentions, sanitizeChatAgents, sanitizeTeamAgents } from '../shared/mentions';
+import { parseRoomMentions, readAgentAccess, sanitizeChatAgents, sanitizeTeamAgents } from '../shared/mentions';
 import { publicModelError } from './modelError';
 import { normalizeChatText, RoomState } from './roomState';
 import { runRoomDiscussion } from './roomReply';
 import { runSociety } from './society/Orchestrator';
 import { leadNotesFromConflict } from './society/leadNotes';
 import { runBenchmark } from './bench/runner';
-import { createServerProvider } from './society/provider';
-import { resolveModelAccess } from './modelAccess';
+import { createRoutingProvider } from './routingProvider';
+import { isFailed, resolveRoutedAccess } from './modelAccess';
+import { handleModelTest } from './modelTest';
 import { assertChatProxyTarget, MAX_PROXY_BODY } from './proxyGuard';
 import { beginRunStats, currentRunStats, endRunStats } from './society/decider/runStats';
 import { setBossAsker, setDecisionSink, toDecisionWire } from './society/decider/live';
 import { researchSearchCount, researchSources } from './research/research';
 
-async function providerFromClient(msg: { apiKey?: string; baseUrl?: string }) {
-  const access = await resolveModelAccess(msg);
-  return createServerProvider(access.apiKey, access.baseUrl ? { baseUrl: access.baseUrl } : undefined);
+/**
+ * Room chat needs only the speakers' endpoints, so one bad connection fails only that speaker.
+ * A run or benchmark also calls the default connection for planning and review,
+ * so it is rejected before it starts if the default or any agent connection failed.
+ */
+async function providerFromClient(
+  msg: { apiKey?: string; baseUrl?: string; agents?: unknown },
+  options: { requireAll?: boolean } = {},
+) {
+  const access = await resolveRoutedAccess({
+    apiKey: msg.apiKey,
+    baseUrl: msg.baseUrl,
+    agents: readAgentAccess(msg.agents),
+  });
+  if (options.requireAll) {
+    const failed = [access.fallback, ...access.agents].find(isFailed);
+    if (failed) throw failed.error;
+  } else if (isFailed(access.fallback) && access.agents.length === 0) {
+    throw access.fallback.error;
+  }
+  return createRoutingProvider(access);
 }
 
 /** Forwards one caller-keyed chat completion. Never adds the server key. */
@@ -199,7 +218,7 @@ export function relayPlugin(): Plugin {
     name: 'agora-relay',
     configureServer(server: ViteDevServer) {
       server.middlewares.use((req, res, next) => {
-        if (handleCorsProxy(req, res)) return;
+        if (handleCorsProxy(req, res) || handleModelTest(req, res)) return;
         next();
       });
       if (!server.httpServer) {
@@ -467,8 +486,10 @@ export function attachRelay(httpServer: Server): void {
               }
               let provider;
               try {
-                provider = await providerFromClient(msg);
+                provider = await providerFromClient(msg, { requireAll: true });
               } catch (error) {
+                room.markStopped(runId);
+                send(ws, { type: 'society-run-status', runId, status: 'stopped' });
                 send(ws, { type: 'society-error', error: publicModelError(error) });
                 break;
               }
@@ -636,7 +657,7 @@ export function attachRelay(httpServer: Server): void {
               }
               let provider;
               try {
-                provider = await providerFromClient(msg);
+                provider = await providerFromClient(msg, { requireAll: true });
               } catch (error) {
                 send(ws, { type: 'society-error', error: publicModelError(error) });
                 break;

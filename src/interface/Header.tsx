@@ -10,7 +10,7 @@ import { getActiveAgentSet } from '../integration/store/teamStore';
 import { getAllAgents } from '../data/agents';
 import { MAX_PLAYERS } from '../../shared/protocol';
 import { networkClient, startSwarm } from '../network/NetworkClient';
-import BYOKModal from './BYOKModal';
+import ConnectionsModal from './ConnectionsModal';
 import InfoModal from './InfoModal';
 import { NegotiationArena } from './NegotiationArena';
 
@@ -114,7 +114,7 @@ const Header: React.FC = () => {
 
           <div className="flex items-center gap-3 min-w-0">
             <a
-              href="https://github.com/Ritesh-Root/new-desgn-agora"
+              href="https://github.com/Ritesh-Root/agora"
               target="_blank"
               rel="noopener"
               className="text-zinc-300 hover:text-ink transition-colors shrink-0"
@@ -253,7 +253,7 @@ const Header: React.FC = () => {
             data-testid="byok-btn"
             onClick={() => setBYOKOpen(true)}
             className="relative text-zinc-500 hover:text-ink transition-colors p-1"
-            title="API Key (BYOK)"
+            title="Model connections"
           >
             <KeyRound size={16} className={hasKey ? 'text-emerald-500 hover:text-emerald-600' : ''} />
             {hasKey && (
@@ -268,7 +268,7 @@ const Header: React.FC = () => {
       )}
 
       {isBYOKOpen && (
-        <BYOKModal key="byok-modal" onClose={() => setBYOKOpen(false)} />
+        <ConnectionsModal key="model-connections-modal" onClose={() => setBYOKOpen(false)} />
       )}
 
       {isNegotiationOpen && (

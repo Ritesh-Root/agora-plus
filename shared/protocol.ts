@@ -112,9 +112,9 @@ export type ClientMessage =
   | { type: 'leave' }
   | { type: 'end-session' }
   | { type: 'register-cabins'; cabinPoiIds: string[] }
-  | { type: 'run-society'; brief: string; baseUrl?: string; apiKey?: string; model?: string; agents?: { name: string; description: string; model?: string }[] }
+  | { type: 'run-society'; brief: string; baseUrl?: string; apiKey?: string; model?: string; agents?: { name: string; description: string; model?: string; baseUrl?: string; apiKey?: string }[] }
   | { type: 'run-benchmark'; brief: string; baseUrl?: string; apiKey?: string; model?: string }
-  | { type: 'room-chat'; text: string; baseUrl?: string; apiKey?: string; model?: string; agents?: { name: string; description: string }[] }
+  | { type: 'room-chat'; text: string; baseUrl?: string; apiKey?: string; model?: string; agents?: { name: string; description: string; model?: string; baseUrl?: string; apiKey?: string }[] }
   | { type: 'decision-reply'; id: string; action: 'approve' | 'edit' | 'reject'; text?: string }
   | { type: 'cancel-run' };
 

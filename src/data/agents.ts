@@ -40,6 +40,8 @@ export interface AgentNode {
   description: string;
   color: string;
   model: string;
+  /** Saved connection. Missing means the room user's default connection. */
+  connectionId?: string;
   humanInTheLoop?: boolean;
   /** Ids of reusable skills (from the skill library) attached to this agent. */
   skillIds?: string[];

@@ -1,5 +1,7 @@
 # AGORA
 
+![Five agents in the shared office](docs/images/agora-office.jpg)
+
 AGORA is Ritesh-Root’s open-source workspace where people and AI agents share tasks, chat, and one Markdown document. The session is drawn as a 3D office. When WebGPU and WebGL2 are both unavailable, the same session uses a 2D office.
 
 This repository is a working local workspace, not a finished hosted product. A room lives in the memory of one server process. The current source includes a production process and host controls. No public deployment URL is recorded here.
@@ -15,10 +17,14 @@ Implemented in the current source:
 - See the session in a 3D office (WebGPU, or WebGL2) or the 2D fallback.
 - Save the document to your own machine as `agora-document.md`.
 - Leave on your own, or, as host, end the session for everyone.
-- Choose an OpenAI-compatible chat model in the browser, including a different model on an individual agent.
+- Save more than one OpenAI-compatible model connection in this browser. One is the default. An agent can use another connection and override its model. Keys stay in the browser and are not stored in the room.
 - Start the header’s benchmark control. That automated comparison is not a user study. See [Validation and performance](#validation-and-performance).
 
 Not in this build: saved cloud rooms, accounts, spending caps, and host approval before a document edit becomes final. See [Roadmap](#roadmap).
+
+![The public room, with each person in their own color](docs/images/agora-room.jpg)
+
+<img src="docs/images/agora-agent.jpg" alt="An agent" width="280" />
 
 ## Quick start
 
@@ -33,12 +39,7 @@ npm run dev
 
 The first person to join is the host, unless `DEMO_HOST_SECRET` is set. With that variable set, only a matching host code, or the server-issued resume token, makes someone the host. A display name does not.
 
-Model calls need a key:
-
-- Save a key in the browser model settings. It stays in `localStorage` under `byok-config`.
-- Or leave the browser key empty and set `DASHSCOPE_API_KEY` in the server environment. That server key is sent only to `token-plan.maas.qwencloudapi.com`. Any other endpoint needs the caller’s own key.
-
-`.env.example` comments mention `QWEN_BASE_URL` and `QWEN_MODEL`. The server does not read those names. The selected model and base URL come from the browser settings.
+Model calls need a key saved in this browser under Model connections. The key stays in `localStorage`. The room does not store it.
 
 Other scripts:
 
@@ -99,19 +100,18 @@ Nothing in this path writes the room to a database. Persistence across restarts 
 
 ## Model configuration
 
-The default browser provider is Qwen Cloud’s Token Plan endpoint:
+Open **Model connections** in the header. Each saved connection has a name, an OpenAI-compatible base URL, an API key, and a default model ID. **Test connection** calls that endpoint and shows a short error. It does not print the key.
 
-`https://token-plan.maas.qwencloudapi.com/compatible-mode/v1`
+One connection is the default for this browser. An agent uses that default unless you pick another connection for it. A model ID on the agent replaces the connection’s model only when it differs. Every connection uses the same chat-completions protocol. Native Anthropic or Google APIs are not a separate path.
 
-The default chat model is `deepseek-v4.1-flash`. The model list also includes `qwen3.8-max`, `qwen3.7-plus`, `qwen3.8-flash`, and `glm-5.3`. NVIDIA is a second provider, at `https://integrate.api.nvidia.com/v1`. AGORA is not limited to one vendor’s models. A saved base URL can point at another public HTTPS chat-completions endpoint when you supply that endpoint’s key.
-
-Settings are stored in the browser under `byok-config`. An agent’s own model is sent with the run when it differs from the selected model. The header omits an agent model that matches the selection.
+A single configuration saved earlier under `byok-config` is copied into the connection list on the next load. The key, URL, and model are kept. The copy is stored in this browser under `agora-model-connections`.
 
 Key handling:
 
-- A caller key is sent as-is and is never replaced by the server key.
-- `DASHSCOPE_API_KEY` is used only when the caller key is empty and the host is `token-plan.maas.qwencloudapi.com`.
-- Any other endpoint without a caller key fails with “Add an API key for that model endpoint.”
+- Your connections and keys stay in this browser. Room state stores chat, tasks, and the document. It does not store keys.
+- A caller key is sent as-is and is never replaced by the server key or by another connection’s key.
+- A call without a caller key fails with “Add an API key for that model endpoint.”
+- A failed call does not switch to another person’s key, or to a different saved connection.
 - The browser proxy copies the caller’s `Authorization` header and does not attach the server key.
 - Provider failures shown in the room are short messages, such as “The API key was rejected.” or “That model is not available.” The provider body and the key are not shown.
 
@@ -159,7 +159,9 @@ Verified from this repository:
 - [Dockerfile](Dockerfile) builds the client, bundles [server/prod.ts](server/prod.ts) to `dist/server.mjs`, and runs `node dist/server.mjs`.
 - That process listens on `0.0.0.0` and `PORT`, default 8080, serves `dist/`, and attaches the relay.
 
-No public demo URL is available. A container image and a Cloud Run service were not verified from this workspace. [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds a static `dist/` artifact for GitHub Pages. That workflow does not start the room process, so a Pages site would not be the shared room.
+The static prototype is [https://agora-gamma-seven.vercel.app](https://agora-gamma-seven.vercel.app). Joining there opens a local preview in the browser. It does not start the shared room, and it does not call a model.
+
+A container image and a Cloud Run service were not verified from this workspace. [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds a static `dist/` artifact for GitHub Pages. That workflow does not start the room process, so a Pages site would not be the shared room.
 
 When every browser disconnects, the sockets close. With a platform that stops an idle process, the in-memory room is gone. A model call still in flight is not a background job. This repository does not promise that a document finishes after everyone leaves, or that it survives a restart.
 
@@ -172,7 +174,7 @@ When every browser disconnects, the sockets close. With a platform that stops an
 - Room state is memory. A restart or an idle shutdown clears it. Save a copy if you want a file.
 - There is no spending cap.
 - A provider can reject a key, lack a model, or time out. The room shows a short error and does not echo the upstream body.
-- Browser keys remain in `localStorage` on that origin.
+- Browser keys remain in `localStorage` on that origin. They are not part of the room snapshot.
 - The server key must not be used against an arbitrary base URL. The proxy is not an open forwarder.
 - Bundled 3D models are CC BY-NC 4.0. They are placeholders and are not licensed for commercial use. See [License and maintainer](#license-and-maintainer).
 
@@ -183,6 +185,7 @@ No dates are set.
 - Persist a cloud room across restarts, and keep an in-flight run when nobody is connected.
 - Hold lasting document edits until the host accepts them.
 - Replace the CC BY-NC office models before any commercial use.
+- Planned, not built: a temporary workspace, separate from the room server, where a participant can install a CLI and connect a compatible tool to the room. Installing a CLI does not make it an agent. The deliverable today remains one Markdown document.
 
 ## License and maintainer
 
@@ -191,9 +194,9 @@ Source code is MIT. See [LICENSE](LICENSE).
 Third-party code and assets have their own notices. Those notices stay in the files the licenses require:
 
 - [NOTICE.md](NOTICE.md) — MIT attribution for the upstream office shell, and the CC BY-NC terms for the bundled models.
-- [LICENSE-ASSETS.md](LICENSE-ASSETS.md) — CC BY-NC 4.0 for the 3D assets, including the required credit to Arturo Paracuellos.
+- [LICENSE-ASSETS.md](LICENSE-ASSETS.md) — CC BY-NC 4.0 for the 3D assets.
 - [public/models/README.txt](public/models/README.txt) — the same asset terms, next to the model files.
 
 Maintainer: Ritesh-Root &lt;workstationritalks@gmail.com&gt; · https://github.com/Ritesh-Root
 
-Repository: https://github.com/Ritesh-Root/new-desgn-agora
+Repository: https://github.com/Ritesh-Root/agora

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Hash, Send } from 'lucide-react';
+import { wireAgent } from '../core/llm/connections';
 import { getAllAgents } from '../data/agents';
 import { useCoreStore } from '../integration/store/coreStore';
 import { useActiveTeam } from '../integration/store/teamStore';
@@ -8,11 +9,7 @@ import { networkClient } from '../network/NetworkClient';
 import { useRoomChatStore } from '../network/roomChatStore';
 import { useRosterStore } from '../network/RosterStore';
 import { parseRoomMentions } from '../../shared/mentions';
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  return parts.map((part) => part[0]?.toUpperCase() ?? '').join('') || '?';
-}
+import { AgentPortrait } from './AgentPortrait';
 
 function clock(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -106,13 +103,14 @@ const PublicRoom: React.FC = () => {
     const asked = parseRoomMentions(text, agents);
     if (networkClient.isOpen()) {
       const config = useUiStore.getState().llmConfig;
+      const file = useUiStore.getState().connections;
       networkClient.send({
         type: 'room-chat',
         text,
         apiKey: config.apiKey,
         baseUrl: config.baseUrl,
         model: config.model,
-        agents: agents.map((agent) => ({ name: agent.name, description: agent.description })),
+        agents: agents.map((agent) => wireAgent(agent, file)),
       });
     } else if (self) {
       useRoomChatStore.getState().add({
@@ -147,9 +145,7 @@ const PublicRoom: React.FC = () => {
         <div className="mt-3 space-y-2">
           {roster.map((person) => (
             <div key={person.id} className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black text-ink" style={{ backgroundColor: person.color }}>
-                {initials(person.name)}
-              </div>
+              <AgentPortrait color={person.color} className="w-8 h-8 rounded-full shrink-0" />
               <div className="min-w-0">
                 <p className="text-xs font-bold truncate">{person.name}{person.id === self?.id ? ' · you' : ''}</p>
                 <p className="text-[10px] text-zinc-400">{person.isHost ? 'Boss' : 'In the room'}</p>
@@ -177,9 +173,7 @@ const PublicRoom: React.FC = () => {
               onClick={() => appendMention(agent.name)}
               className="w-full flex items-center gap-2 text-left rounded-xl px-1 py-1 hover:bg-zinc-100"
             >
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-black text-ink" style={{ backgroundColor: agent.color }}>
-                {initials(agent.name)}
-              </div>
+              <AgentPortrait color={agent.color} className="w-8 h-8 rounded-full shrink-0 bg-zinc-100" />
               <div className="min-w-0">
                 <p className="text-xs font-bold truncate">{agent.name}</p>
                 <p className="text-[10px] text-zinc-400 truncate">{agent.description}</p>
@@ -206,11 +200,12 @@ const PublicRoom: React.FC = () => {
           )}
           {messages.map((message) => {
             const mine = message.playerId === self?.id;
+            const speaker = agents.find((agent) => agent.name === message.name)
+              ?? roster.find((person) => person.id === message.playerId)
+              ?? roster.find((person) => person.name === message.name);
             return (
               <div key={message.id} className="flex gap-3 mb-4">
-                <div className="w-8 h-8 rounded-full bg-butter flex items-center justify-center text-[10px] font-black shrink-0">
-                  {initials(message.name)}
-                </div>
+                <AgentPortrait color={speaker?.color ?? '#17150f'} className="w-8 h-8 rounded-full shrink-0" />
                 <div className="min-w-0">
                   <p className="text-xs font-bold">{message.name}{mine ? ' · you' : ''} <time className="font-medium text-zinc-400">{clock(message.timestamp)}</time></p>
                   <p className="text-sm leading-relaxed text-zinc-700 whitespace-pre-wrap mt-1">{message.text}</p>
@@ -243,9 +238,11 @@ const PublicRoom: React.FC = () => {
                     }}
                     className={`w-full flex items-center gap-2 px-3 py-2 text-left ${index === menuIndex ? 'bg-zinc-100' : ''}`}
                   >
-                    <span className="w-6 h-6 rounded-md text-[10px] font-black flex items-center justify-center" style={{ backgroundColor: option.color }}>
-                      {option.name === 'all' ? '@' : initials(option.name)}
-                    </span>
+                    {option.name === 'all' ? (
+                      <span className="w-6 h-6 rounded-md text-[10px] font-black flex items-center justify-center bg-ink text-white">@</span>
+                    ) : (
+                      <AgentPortrait color={option.color} className="w-6 h-6 rounded-full shrink-0 bg-zinc-100" />
+                    )}
                     <span className="min-w-0">
                       <span className="block text-xs font-bold">@{option.name}</span>
                       <span className="block text-[10px] text-zinc-400 truncate">{option.note}</span>

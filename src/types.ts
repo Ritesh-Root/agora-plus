@@ -1,5 +1,6 @@
 import type * as THREE from 'three/webgpu';
 
+import type { ConnectionFile } from './core/llm/connections';
 import { LLMConfig } from './core/llm/types';
 
 export interface ChatMessage {
@@ -40,8 +41,12 @@ export interface CharacterState {
   activeAuditTaskId: string | null;
   setActiveAuditTaskId: (taskId: string | null) => void;
 
-  // BYOK LLM Configuration
+  // Saved model connections. Keys stay in this browser.
+  connections: ConnectionFile;
   llmConfig: LLMConfig;
+  saveModelConnection: (input: { id?: string; name: string; baseUrl: string; apiKey: string; model: string }) => { error: string } | { id: string };
+  removeModelConnection: (id: string) => void;
+  chooseDefaultConnection: (id: string) => void;
 
   setThinking: (isThinking: boolean) => void;
   setIsTyping: (isTyping: boolean) => void;

@@ -36,3 +36,59 @@ export async function resolveModelAccess(
   if (!key) throw new Error(MISSING_KEY);
   return { apiKey: key };
 }
+
+export interface ResolvedEndpoint {
+  apiKey: string;
+  baseUrl?: string;
+}
+
+export interface FailedEndpoint {
+  error: unknown;
+}
+
+export interface RoutedAccess {
+  fallback: ResolvedEndpoint | FailedEndpoint;
+  agents: Array<{ name: string; model?: string } & (ResolvedEndpoint | FailedEndpoint)>;
+}
+
+function isFailed(endpoint: ResolvedEndpoint | FailedEndpoint): endpoint is FailedEndpoint {
+  return 'error' in endpoint;
+}
+
+export { isFailed };
+
+/**
+ * Resolves the default connection and any agent that brought its own URL or key.
+ * An agent failure stays on that agent. It does not borrow another agent's key or the server key
+ * unless that agent's own URL is the approved host and its own key is empty.
+ */
+export async function resolveRoutedAccess(
+  input: {
+    apiKey?: string;
+    baseUrl?: string;
+    agents?: { name: string; apiKey?: string; baseUrl?: string; model?: string; own?: boolean }[];
+  },
+  resolve?: (hostname: string) => Promise<string[]>,
+): Promise<RoutedAccess> {
+  let fallback: ResolvedEndpoint | FailedEndpoint;
+  try {
+    fallback = await resolveModelAccess({ apiKey: input.apiKey, baseUrl: input.baseUrl }, resolve);
+  } catch (error) {
+    fallback = { error };
+  }
+  const agents: RoutedAccess['agents'] = [];
+  for (const agent of input.agents ?? []) {
+    if (!agent.own) continue;
+    const model = agent.model?.trim() || undefined;
+    try {
+      const access = await resolveModelAccess({
+        apiKey: agent.apiKey,
+        baseUrl: agent.baseUrl?.trim() || input.baseUrl,
+      }, resolve);
+      agents.push({ name: agent.name, model, ...access });
+    } catch (error) {
+      agents.push({ name: agent.name, model, error });
+    }
+  }
+  return { fallback, agents };
+}

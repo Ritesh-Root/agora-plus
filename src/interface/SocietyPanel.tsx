@@ -93,7 +93,7 @@ export const SocietyPanel: React.FC = () => {
             </div>
             <div>
               <h2 className="font-black text-ink uppercase tracking-tight text-xs leading-none">Society Workspace</h2>
-              <p className="text-[9px] text-zinc-400 font-semibold mt-0.5">Qwen Swarm Parallel Decomposition & Execution</p>
+              <p className="text-[9px] text-zinc-400 font-semibold mt-0.5">Parallel task decomposition and execution</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-zinc-100/50 rounded-lg text-zinc-400 hover:text-zinc-600 transition-colors">

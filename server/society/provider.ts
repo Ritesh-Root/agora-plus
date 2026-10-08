@@ -27,9 +27,41 @@ export interface ServerProvider extends LLMLike {
   takeUsage(): RunUsage;
 }
 
+export function isNvidiaTarget(apiKey: string, baseUrl?: string): boolean {
+  return apiKey.trim().startsWith('nvapi-') || (baseUrl ?? '').includes('api.nvidia.com');
+}
+
+/** On NVIDIA NIM, Qwen Cloud model tiers map to the hosted qwen3.5 MoE model. */
+export function requestModel(model: string, isNvidia: boolean): string {
+  if (!isNvidia) return model;
+  if (
+    model.includes('qwen-max') ||
+    model.includes('qwen-plus') ||
+    model.includes('qwen-turbo') ||
+    model.startsWith('qwen3.') ||
+    model === 'glm-5.3'
+  ) {
+    return 'qwen/qwen3.5-122b-a10b';
+  }
+  return model;
+}
+
+/** Endpoint-specific request fields. The connection test sends the same ones, so its result matches real runs. */
+export function requestOptions(model: string, isNvidia: boolean): Record<string, unknown> {
+  if (isNvidia) {
+    // qwen3.5 NIM backends 500 ("unit variant") unless max_completion_tokens is present.
+    // Without thinking disabled, qwen3.5 reasons for minutes and can spend the whole
+    // completion budget on hidden reasoning, returning empty content.
+    return model.startsWith('qwen/')
+      ? { max_completion_tokens: 8192, chat_template_kwargs: { thinking: false } }
+      : { max_completion_tokens: 8192 };
+  }
+  return model.toLowerCase().includes('deepseek') ? { enable_thinking: false } : {};
+}
+
 export function createServerProvider(apiKey: string, options?: { baseUrl?: string }): ServerProvider {
   const requested = options?.baseUrl?.trim();
-  const isNvidia = apiKey.trim().startsWith('nvapi-') || (requested ?? '').includes('api.nvidia.com');
+  const isNvidia = isNvidiaTarget(apiKey, requested);
   const baseUrl = requested
     ? (requested.endsWith('/chat/completions') ? requested : `${requested.replace(/\/$/, '')}/chat/completions`)
     : isNvidia
@@ -50,19 +82,7 @@ export function createServerProvider(apiKey: string, options?: { baseUrl?: strin
       return { ...usage };
     },
     async generateCompletion(messages, tools, systemInstruction, modelName) {
-      // If using NVIDIA NIM, map Qwen Cloud model tiers to the hosted qwen3.5 MoE model
-      let model = modelName || 'deepseek-v4.1-flash';
-      if (isNvidia) {
-        if (
-          model.includes('qwen-max') ||
-          model.includes('qwen-plus') ||
-          model.includes('qwen-turbo') ||
-          model.startsWith('qwen3.') ||
-          model === 'glm-5.3'
-        ) {
-          model = 'qwen/qwen3.5-122b-a10b';
-        }
-      }
+      const model = requestModel(modelName || 'deepseek-v4.1-flash', isNvidia);
 
       const body: any = {
         model,
@@ -83,17 +103,7 @@ export function createServerProvider(apiKey: string, options?: { baseUrl?: strin
         body.tools = tools;
       }
 
-      if (isNvidia) {
-        // qwen3.5 NIM backends 500 ("unit variant") unless max_completion_tokens is present.
-        body.max_completion_tokens = 8192;
-        if (model.startsWith('qwen/')) {
-          // Without this, qwen3.5 reasons for minutes and can spend the whole
-          // completion budget on hidden reasoning, returning empty content.
-          body.chat_template_kwargs = { thinking: false };
-        }
-      } else if (model.toLowerCase().includes('deepseek')) {
-        body.enable_thinking = false;
-      }
+      Object.assign(body, requestOptions(model, isNvidia));
 
       // NIM's qwen3.5 pool intermittently 500s on identical requests (~1 in 6),
       // so transient 5xx/network failures get retried with backoff.
@@ -109,6 +119,8 @@ export function createServerProvider(apiKey: string, options?: { baseUrl?: strin
               'Authorization': `Bearer ${apiKey}`,
             },
             body: JSON.stringify(body),
+            // The host check covers only the first URL, so a redirect could reach a private address.
+            redirect: 'error',
             signal: AbortSignal.timeout(120_000),
           });
 

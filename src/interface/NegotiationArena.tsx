@@ -93,7 +93,7 @@ export const NegotiationArena: React.FC<{ onClose: () => void }> = ({ onClose })
               <div className="flex-1 min-w-0">
                 <p className="text-[11px] font-medium text-red-600 break-words">{error}</p>
                 {!hasKey && (
-                  <button onClick={() => setBYOKOpen(true)} className="mt-1 text-[10px] font-black uppercase tracking-widest text-red-500 hover:text-red-700">Open BYOK →</button>
+                  <button onClick={() => setBYOKOpen(true)} className="mt-1 text-[10px] font-black uppercase tracking-widest text-red-500 hover:text-red-700">Model connections</button>
                 )}
               </div>
             </div>

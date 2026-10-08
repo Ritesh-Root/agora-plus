@@ -65,7 +65,7 @@ export const BenchmarkPanel: React.FC = () => {
               <Loader2 className="animate-spin text-ink" size={32} />
               <div className="text-center">
                 <span className="text-xs font-black uppercase tracking-widest text-ink block animate-pulse">Measuring performance metrics</span>
-                <span className="text-[10px] text-zinc-400 block mt-1">Running concurrent swarm tasks & judging with Qwen-max...</span>
+                <span className="text-[10px] text-zinc-400 block mt-1">Running concurrent swarm tasks...</span>
               </div>
             </div>
           )}

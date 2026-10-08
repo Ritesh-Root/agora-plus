@@ -73,7 +73,7 @@ const JoinModal: React.FC = () => {
                     ? 'You left the room. This browser stays disconnected until you join again.'
                     : isDropped
                       ? 'The connection to the room dropped. Reconnect to continue. This is not a local demo.'
-                      : 'Shared demo for up to 5 people. Pick a name and color. A host code is only for the person running the room.'}
+                      : 'Shared room for up to 5 people. Pick a name and a color.'}
             </p>
           </div>
 
@@ -131,11 +131,15 @@ const JoinModal: React.FC = () => {
                   type="password"
                   value={hostCode}
                   onChange={(e) => setHostCode(e.target.value)}
-                  placeholder="Only the demo host"
+                  placeholder="Only if you run this room"
+                  aria-describedby="join-host-code-help"
                   autoComplete="off"
                   disabled={isBusy}
                   className="w-full bg-zinc-50 border border-zinc-200/70 rounded-full px-6 py-4 text-sm text-ink font-medium placeholder:text-zinc-400 focus:outline-none focus:border-butter-600 focus:ring-2 focus:ring-butter/40 transition-all shadow-sm disabled:opacity-50"
                 />
+                <p id="join-host-code-help" className="mt-3 ml-1 text-[11px] font-medium text-zinc-400 leading-relaxed">
+                  Only the person running this room needs a host code. Everyone else leaves it empty and joins as a guest. On a room set up without a code, the first person to join becomes the host.
+                </p>
               </div>
 
               <div className="mb-10">

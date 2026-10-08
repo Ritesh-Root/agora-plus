@@ -1,6 +1,7 @@
 import { LLMMessage } from '../llm/types';
 import { createProvider, isValidKey, defaultModelFor } from '../llm/providers';
 import { PROVIDERS, DEFAULT_PROVIDER } from '../llm/constants';
+import { wireAgent } from '../llm/connections';
 import { useUiStore } from '../../integration/store/uiStore';
 import { useCoreStore } from '../../integration/store/coreStore';
 import { ToolRegistry } from './ToolRegistry';
@@ -38,18 +39,24 @@ export class AgentBrain {
       this.refreshFromStore();
       const core = useCoreStore.getState();
       const llmConfig = useUiStore.getState().llmConfig;
-
-      const provider = llmConfig.provider ?? DEFAULT_PROVIDER;
+      const wired = wireAgent(this.host.data, useUiStore.getState().connections);
+      const ownConnection = wired.baseUrl !== undefined;
+      const apiKey = ownConnection ? (wired.apiKey || '') : (llmConfig.apiKey || '');
+      const baseUrl = wired.baseUrl || llmConfig.baseUrl;
+      // An agent's own connection is typed from its own key and URL, never the default connection's provider.
+      const provider = apiKey.startsWith('nvapi-') || (baseUrl || '').includes('api.nvidia.com')
+        ? 'nvidia'
+        : ownConnection ? DEFAULT_PROVIDER : (llmConfig.provider ?? DEFAULT_PROVIDER);
       const spec = PROVIDERS[provider];
-      if (!llmConfig.apiKey) throw new Error(`${spec.label} API key is required`);
-      if (!isValidKey(provider, llmConfig.apiKey)) {
+      if (!apiKey) {
+        throw new Error(ownConnection ? 'Add an API key for that model endpoint.' : `${spec.label} API key is required`);
+      }
+      if (!isValidKey(provider, apiKey)) {
         throw new Error(`A valid ${spec.label} API key (${spec.keyPlaceholder}) is required`);
       }
 
-      const llm = createProvider(provider, llmConfig.apiKey, llmConfig.baseUrl);
-      const configured = llmConfig.model?.trim() || defaultModelFor(provider);
-      const agentModel = this.host.data.model;
-      const model = agentModel && agentModel !== defaultModelFor(DEFAULT_PROVIDER) ? agentModel : configured;
+      const llm = createProvider(provider, apiKey, baseUrl);
+      const model = wired.model || llmConfig.model?.trim() || defaultModelFor(provider);
 
       // 1. Manage Message History
       if (!options.isChat) {

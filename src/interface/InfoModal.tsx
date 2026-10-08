@@ -42,7 +42,7 @@ const InfoModal: React.FC<InfoModalProps> = ({ onClose }) => {
 
           <div className="mt-6 flex flex-col items-center gap-6">
             <a
-              href="https://github.com/Ritesh-Root/new-desgn-agora"
+              href="https://github.com/Ritesh-Root/agora"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-center gap-2.5 px-8 py-3.5 bg-zinc-100 text-zinc-600 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-zinc-200 transition-all active:scale-95 cursor-pointer shadow-sm w-full"

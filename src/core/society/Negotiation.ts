@@ -1,5 +1,5 @@
 /**
- * Negotiation / Referee — AGORA's conflict-resolution layer (Track-3 differentiator).
+ * Negotiation / Referee — AGORA's conflict-resolution layer.
  *
  * When agents hold competing positions, a Referee runs a structured debate:
  * debaters argue, the Referee scores each position against a rubric, debaters

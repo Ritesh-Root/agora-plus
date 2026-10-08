@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { AgentNode, AgenticSystem, getAllCharacters, AgentSkill } from '../../data/agents';
 import { USER_COLOR, USER_COLOR_LIGHT, USER_COLOR_SOFT } from '../../theme/brand';
 import { DEFAULT_MODELS } from '../../core/llm/constants';
+import { useUiStore } from '../../integration/store/uiStore';
 import { useCoreStore } from '../../integration/store/coreStore';
 import { useTeamStore } from '../../integration/store/teamStore';
 import { useSkillStore } from '../../integration/store/skillStore';
@@ -31,6 +32,7 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
 }) => {
   const isView = mode === 'view';
   const { availableModels } = useCoreStore();
+  const connectionFile = useUiStore((state) => state.connections);
   const { saveCustomSystem } = useTeamStore();
 
   const [editData, setEditData] = useState<AgentNode>(agent);
@@ -209,19 +211,56 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
                 </div>
               ), 'Limit characters to letters, numbers and spaces. The ID is auto-generated.')}
 
+              {renderField('Connection', <Cpu size={12} />, (() => {
+                const selected = connectionFile.connections.find((item) => item.id === editData.connectionId);
+                const roomDefault = connectionFile.connections.find((item) => item.id === connectionFile.defaultId) ?? connectionFile.connections[0];
+                const label = selected?.name || (roomDefault ? `Room default (${roomDefault.name})` : 'Room default');
+                if (isView) {
+                  return <p className="text-sm font-bold text-ink">{label}</p>;
+                }
+                return (
+                  <select
+                    data-testid="agent-connection"
+                    value={editData.connectionId || ''}
+                    onChange={(event) => {
+                      const id = event.target.value;
+                      const next = connectionFile.connections.find((item) => item.id === id) ?? roomDefault;
+                      const previous = selected ?? roomDefault;
+                      const currentModel = editData.model?.trim();
+                      const stale = !currentModel || currentModel === previous?.model;
+                      updateDraft({
+                        connectionId: id || undefined,
+                        model: stale ? (next?.model || currentModel || '') : editData.model,
+                      });
+                    }}
+                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-black/5 cursor-pointer"
+                  >
+                    <option value="">{roomDefault ? `Room default (${roomDefault.name})` : 'Room default'}</option>
+                    {connectionFile.connections.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name}</option>
+                    ))}
+                  </select>
+                );
+              })(), 'Which saved connection this agent calls. Room default follows the connection marked default in this browser.')}
+
               {renderField('LLM Model', <Cpu size={12} />, isView ? (
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 border border-zinc-200 rounded-lg text-xs font-mono text-zinc-600 w-fit lowercase">
                   {editData.model || DEFAULT_MODELS.text}
                 </div>
               ) : (
-                <select
-                  value={editData.model || DEFAULT_MODELS.text}
-                  onChange={(e) => updateDraft({ model: e.target.value })}
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-black/5 cursor-pointer lowercase"
-                >
-                  {availableModels.map(m => <option key={m} value={m} className="lowercase">{m}</option>)}
-                </select>
-              ), 'The LLM this agent uses (per-agent model tiering — e.g. qwen3.8-max for planners, qwen3.8-flash for cheap subtasks).')}
+                <>
+                  <input
+                    data-testid="agent-model"
+                    list="agent-model-options"
+                    value={editData.model || ''}
+                    onChange={(event) => updateDraft({ model: event.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-black/5 lowercase"
+                  />
+                  <datalist id="agent-model-options">
+                    {availableModels.map((item) => <option key={item} value={item} />)}
+                  </datalist>
+                </>
+              ), 'Model ID for this agent. Leave it matching the connection when you do not want an override.')}
             </div>
 
             {/* Content Group */}

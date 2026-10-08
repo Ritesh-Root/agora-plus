@@ -6,6 +6,7 @@
 import { createReadStream, existsSync, statSync } from 'fs';
 import { createServer } from 'http';
 import { extname, join, resolve, sep } from 'path';
+import { handleModelTest } from './modelTest';
 import { attachRelay, handleCorsProxy } from './relay';
 
 const port = Number(process.env.PORT) || 8080;
@@ -29,7 +30,7 @@ const types: Record<string, string> = {
 };
 
 const server = createServer((req, res) => {
-  if (handleCorsProxy(req, res)) return;
+  if (handleCorsProxy(req, res) || handleModelTest(req, res)) return;
   const url = new URL(req.url ?? '/', 'http://localhost');
   const relative = decodeURIComponent(url.pathname).replace(/^\/+/, '');
   if (relative.includes('\0')) {

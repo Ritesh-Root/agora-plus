@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canSeeChat, parseRoomMentions, sanitizeChatAgents } from '../shared/mentions';
+import { canSeeChat, parseRoomMentions, readAgentAccess, sanitizeChatAgents, sanitizeTeamAgents } from '../shared/mentions';
 import { runRoomDiscussion } from './roomReply';
 import type { LLMLike } from './society/provider';
 
@@ -37,6 +37,20 @@ describe('room mentions', () => {
     expect(sanitizeChatAgents([{ name: '  Film Director  ', description: 'Leads.' }, { name: 'all' }, { name: '' }]))
       .toEqual([{ name: 'Film Director', description: 'Leads.' }]);
   });
+
+  it('keeps an agent key for routing and off the prompt team', () => {
+    const raw = [{ name: 'Writer', description: 'Writes.', model: 'model-b', baseUrl: 'https://b.example/v1', apiKey: 'key-b' }];
+    expect(sanitizeTeamAgents(raw)).toEqual([{ name: 'Writer', description: 'Writes.', model: 'model-b' }]);
+    expect(sanitizeChatAgents(raw)).toEqual([{ name: 'Writer', description: 'Writes.', model: 'model-b' }]);
+    expect(readAgentAccess(raw)).toEqual([{
+      name: 'Writer',
+      model: 'model-b',
+      baseUrl: 'https://b.example/v1',
+      apiKey: 'key-b',
+      own: true,
+    }]);
+    expect(JSON.stringify(sanitizeTeamAgents(raw))).not.toContain('key-b');
+  });
 });
 
 describe('room discussion', () => {
@@ -60,5 +74,28 @@ describe('room discussion', () => {
     });
     expect(replies.map((reply) => reply.name)).toEqual(['Film Director', 'Visual Lead']);
     expect(seen[1]).toContain('Film Director speaking.');
+  });
+
+  it('posts each distinct error once, after the pass, and keeps it out of later prompts', async () => {
+    const lines: string[] = ['Ritesh: @all plan a short film'];
+    const seen: string[] = [];
+    const speakers = [...team, { name: 'Editor', description: 'Cuts.' }];
+    const provider: LLMLike = {
+      async generateCompletion(messages) {
+        seen.push(messages[0].content);
+        if (messages[0].content.endsWith('Editor.')) return { content: 'Editor speaking.' };
+        throw new Error('Inference API error (401): bad key');
+      },
+    };
+    const replies = await runRoomDiscussion({
+      speakers,
+      teammates: speakers,
+      provider,
+      transcript: () => lines.join('\n'),
+      post: (name, text) => lines.push(`${name}: ${text}`),
+    });
+    expect(replies.map((reply) => reply.name)).toEqual(['Editor']);
+    expect(seen[2]).not.toContain('API key was rejected');
+    expect(lines.slice(1)).toEqual(['Editor: Editor speaking.', 'Film Director: The API key was rejected.']);
   });
 });

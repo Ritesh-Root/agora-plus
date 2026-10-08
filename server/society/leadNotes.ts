@@ -35,8 +35,8 @@ export async function leadNotesFromConflict(
   const debateTopic = `Do these two outputs conflict for the brief: "${brief}"?`;
   onEvent?.({ type: 'society-debating' });
   const debateResult = await runNegotiation(debateTopic, [
-    { agent: pair[0].title, stance: pair[0].output.slice(0, 500) },
-    { agent: pair[1].title, stance: pair[1].output.slice(0, 500) },
+    { agent: pair[0].title, stance: pair[0].output.slice(0, 500), route: pair[0].role },
+    { agent: pair[1].title, stance: pair[1].output.slice(0, 500), route: pair[1].role },
   ], provider, {
     maxRounds: 2,
     refereeModel: debateModel,
