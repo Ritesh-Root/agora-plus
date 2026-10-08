@@ -27,7 +27,7 @@ export interface LLMLike {
     tools?: unknown[],
     systemInstruction?: string,
     modelName?: string,
-  ): Promise<{ content: string | null }>;
+  ): Promise<{ content: string | null; usage?: { promptTokens: number; completionTokens: number } }>;
 }
 
 export interface SocietyTask {

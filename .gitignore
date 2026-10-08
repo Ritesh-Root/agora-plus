@@ -22,3 +22,4 @@ scripts/
 frontend/
 memory/
 test_reports/
+.agora-data/

@@ -225,7 +225,7 @@ export function relayPlugin(): Plugin {
         console.warn('[relay] No httpServer (middleware mode?) — relay disabled.');
         return;
       }
-      attachRelay(server.httpServer);
+      attachRelay(server.httpServer as Server);
     },
   };
 }
@@ -428,7 +428,8 @@ export function attachRelay(httpServer: Server): void {
               if (!playerId) return;
               const ended = room.tryEndSession(playerId);
               if (!ended.ok) {
-                send(ws, { type: 'society-error', error: ended.error });
+                const { error } = ended as { ok: false; error: string };
+                send(ws, { type: 'society-error', error });
                 break;
               }
               const notice: ServerMessage = { type: 'session-ended' };
