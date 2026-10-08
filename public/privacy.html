@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy — AGORA+</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;900&family=Spline+Sans+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      background: #efebe0;
+      color: #17150f;
+      font-family: "Schibsted Grotesk", system-ui, sans-serif;
+      line-height: 1.5;
+    }
+    main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
+    .mark {
+      width: 2.75rem; height: 2.75rem; border-radius: 0.7rem;
+      background: #17150f; display: grid; place-items: center; margin-bottom: 1.25rem;
+    }
+    .mark span {
+      width: 1.35rem; height: 1.35rem; border-radius: 50%;
+      border: 3px solid #f2cc46; box-sizing: border-box;
+      box-shadow: inset 0 0 0 4px #17150f, inset 0 0 0 7px #f2cc46;
+    }
+    p.kicker { margin: 0 0 0.35rem; font-size: 0.72rem; font-weight: 900; letter-spacing: 0.16em; text-transform: uppercase; color: #d9af1b; }
+    h1 { font-size: 2.2rem; line-height: 1.1; margin: 0 0 1rem; }
+    h2 { font-size: 1.15rem; margin: 1.75rem 0 0.4rem; }
+    p, li { font-size: 1.05rem; }
+    a { color: #17150f; }
+    code { font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 0.92em; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark" aria-hidden="true"><span></span></div>
+    <p class="kicker">AGORA+</p>
+    <h1>Privacy</h1>
+    <p>This page describes a household server you run yourself. AGORA+ does not operate an account for you, and this is not an Amazon privacy policy.</p>
+
+    <h2>What is stored</h2>
+    <p>On the server disk, under <code>AGORA_DATA_DIR</code> (the default folder is <code>.agora-data</code> next to the process): facts you asked it to remember, tasks, approvals that are still waiting, and the text of finished plans. The live office room stays in memory and is gone when the process stops.</p>
+    <p>If you turn on Amazon Bedrock or Amazon Polly, the text of a question or a spoken line is sent to Amazon Web Services in the region you set. If you set a Firecrawl or Exa key, a web question is sent to that service. If those keys are unset, the server does not call them.</p>
+
+    <h2>Who can see it</h2>
+    <p>Anyone who can read the server's files can read the household. Anyone who has the MCP bearer token can call the household tools. If you set a household passcode, the household pages on this site also ask for that passcode. There is one household on the server, not a separate account per person.</p>
+
+    <h2>How to delete it</h2>
+    <p>Ask the server to forget a fact and approve that request, or complete a task in the household panel. To remove everything stored on disk, stop the server and delete the data directory. That does not delete anything in an Amazon account, and it does not delete keys you stored in a password manager or in AWS.</p>
+
+    <h2>This software</h2>
+    <p>AGORA+ is open source under the MIT license. See the <a href="/terms.html">terms</a>.</p>
+  </main>
+</body>
+</html>

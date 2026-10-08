@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900">
+  <rect width="600" height="900" fill="#17150f"/>
+  <rect x="48" y="48" width="504" height="804" rx="36" fill="none" stroke="#f2cc46" stroke-width="2" opacity="0.35"/>
+  <circle cx="300" cy="340" r="118" fill="none" stroke="#f2cc46" stroke-width="26"/>
+  <circle cx="300" cy="340" r="34" fill="#f2cc46"/>
+  <text x="300" y="560" text-anchor="middle" fill="#fcfaf4" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="64" font-weight="700">AGORA+</text>
+  <text x="300" y="628" text-anchor="middle" fill="#f2cc46" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="28">Household memory</text>
+  <text x="300" y="674" text-anchor="middle" fill="#fcfaf4" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="28">tasks, and plans</text>
+</svg>

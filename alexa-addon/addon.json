@@ -1,0 +1,60 @@
+{
+  "manifestVersion": "1.0",
+  "storeListing": {
+    "distributionCountries": ["US"],
+    "locales": {
+      "en-US": {
+        "default": "DEFAULT",
+        "name": {
+          "value": "AGORA+ Household"
+        },
+        "shortDescription": "Household memory, tasks, briefings, and plans you approve before they start.",
+        "fullDescription": "AGORA+ is a household brain you run yourself. Ask it what someone is allergic to, what is due today, or what the house already decided. Tell it a fact to remember, a task to add, or a week of dinners to plan.\n\nRemembering a fact, adding a task, and the morning briefing happen on your server. Forgetting a fact or starting a plan waits until you say yes. The spoken answer stays short. Lists, receipts, and the written plan stay on screen.\n\nFacts, tasks, and finished plans are stored on the server you host, in the data directory you configure. People who can open that server, or who have its token, can read them. The privacy policy and terms linked from this listing describe that server. They are not an Amazon privacy policy.\n\nThis add-on talks to your AGORA+ MCP server over HTTPS. It does not ship a model of its own. Web lookup and spoken audio use the keys you set on that server, or they say they are not set up.",
+        "examplePhrases": [
+          "Ask AGORA what Mia is allergic to",
+          "Tell AGORA to plan dinners for this week",
+          "Ask AGORA for my briefing",
+          "Tell AGORA to remember the spare key is in the kitchen drawer"
+        ],
+        "privacyAndCompliance": {
+          "privacyPolicyUrl": "https://<host>/privacy.html",
+          "termsOfUseUrl": "https://<host>/terms.html"
+        },
+        "mediaAssets": {
+          "icons": {
+            "light": [
+              { "size": "72x72", "uri": "https://<host>/media/icon-72.png" },
+              { "size": "64x64", "uri": "https://<host>/media/icon-64.png" },
+              { "size": "88x88", "uri": "https://<host>/media/icon-88.png" },
+              { "size": "126x126", "uri": "https://<host>/media/icon-126.png" },
+              { "size": "180x180", "uri": "https://<host>/media/icon-180.png" },
+              { "size": "241x241", "uri": "https://<host>/media/icon-241.png" }
+            ],
+            "dark": []
+          },
+          "carouselImages": [
+            {
+              "uri": "https://<host>/media/carousel-600x900.png",
+              "altText": "A butter-yellow ring on a dark ink background, the AGORA+ household mark.",
+              "size": "600x900"
+            }
+          ],
+          "bannerImages": []
+        }
+      }
+    }
+  },
+  "integrations": [
+    {
+      "type": "MCP",
+      "config": {
+        "endpoints": {
+          "default": {
+            "type": "HTTPS",
+            "uri": "https://<host>/mcp"
+          }
+        }
+      }
+    }
+  ]
+}
