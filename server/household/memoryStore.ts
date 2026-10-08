@@ -214,7 +214,15 @@ export function speakRecall(query: string, entries: MemoryEntry[]): RecallSpeech
   const { ranked } = rankMemories(query, entries);
   if (ranked.length === 0) return { speech: "I don't know.", memories: [] };
   const best = ranked[0].score;
-  const tied = ranked.filter((item) => item.score === best).slice(0, 2);
+  // Files written before remember de-duplicated can hold the same fact twice; say it once.
+  const seen = new Set<string>();
+  const tied = ranked.filter((item) => {
+    if (item.score !== best) return false;
+    const key = normaliseFact(item.entry.text);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 2);
   const chosen = tied.map((item) => item.entry);
   const weak = ranked[0].keywordHits < words.length;
   const texts = chosen.map((entry) => entry.text.replace(/[.!?…]+$/u, '').trim());

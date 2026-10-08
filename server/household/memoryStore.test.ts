@@ -155,6 +155,12 @@ describe('speakRecall', () => {
     expect(spoken.speech).toContain("I'm not sure");
   });
 
+  it('says a fact once when an older file holds two copies of it', () => {
+    const copy = { ...mia, id: 'mia-copy', text: 'Mia is allergic to peanuts.', createdAt: '2026-10-07T00:00:00.000Z' };
+    const spoken = speakRecall('allergic', [mia, copy]);
+    expect(spoken.speech).toBe('I remember this: Mia is allergic to peanuts.');
+  });
+
   it('marks a weak keyword overlap as unsure', () => {
     const spoken = speakRecall('peanuts school', [mia, jen]);
     expect(spoken.speech).toContain("I'm not sure, but I have:");
