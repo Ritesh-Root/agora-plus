@@ -11,6 +11,7 @@ import {
   completeTask,
   dailyBriefing,
   forget,
+  getRunStatus,
   listTasks,
   planAndRun,
   recall,
@@ -21,8 +22,7 @@ import {
 import { resolveApproval } from '../household/approvals';
 import { memoryMarkdown } from '../household/memoryStore';
 import { toSpeech } from '../household/speech';
-import { getHub } from '../hub';
-import { getRunRecord, listRecentRuns, type RunRecord } from '../runEngine';
+import { getRunRecord, listRecentRuns } from '../runEngine';
 
 const INSTRUCTIONS = [
   'AGORA+ is a self-hosted household brain. It remembers facts, keeps tasks, and plans work with a small team.',
@@ -109,25 +109,9 @@ function taskView(tasks: { id: string; title: string; status: 'open' | 'done'; d
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const writeSafe = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 
-async function loadRun(runId: string | undefined): Promise<RunRecord | null> {
-  const requested = runId?.trim();
-  if (requested) return getRunRecord(requested);
-  const current = getHub().room.currentRun();
-  if (current) {
-    const live = await getRunRecord(current.id);
-    if (live) return live;
-  }
-  const recent = await listRecentRuns(1);
-  return recent[0] ?? null;
-}
-
-function finishedRun(run: RunRecord): boolean {
-  return run.status === 'complete' || run.status === 'needs_revision' || run.status === 'stopped';
-}
-
 /**
  * Tools, resources, and prompts for one request. Writes go through household actions.
- * Tools that do not need a model do not call one.
+ * ask_agora, plan_and_run, and web_research call the server model. The others do not.
  */
 export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer {
   const server = new McpServer(
@@ -329,7 +313,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     'plan_and_run',
     {
       title: 'Plan and wait',
-      description: 'Call when someone wants the household team to plan a goal, such as a week of meals. It does not start the team. It returns needs_approval, an approvalId, and a short preview. Call approve_action before anything runs.',
+      description: 'Call when someone wants the household team to plan a goal, such as a week of meals. It does not start the team. It returns needs_approval, an approvalId, and a preview that lists the planned steps. Call approve_action before anything runs.',
       inputSchema: z.object({
         goal: z.string().describe('What the household wants planned.'),
       }),
@@ -356,7 +340,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     'get_run_status',
     {
       title: 'Run status',
-      description: 'Call to check a household plan run. Leave runId empty for the latest run. When the run has finished, the result includes a link to the written document. It does not start or change a run.',
+      description: 'Call to check a household plan run. Leave runId empty for the latest run. When the run has finished, the spoken reply is a short summary and the result includes a link to the written document. It does not start or change a run.',
       inputSchema: z.object({
         runId: z.string().optional().describe('A run id. Leave empty for the latest run.'),
       }),
@@ -370,9 +354,10 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       annotations: readOnly,
     },
     async ({ runId }) => {
-      const run = await loadRun(runId);
-      if (!run) return fail(runId?.trim() ? 'I could not find that run.' : 'There is no household run yet.');
-      const finished = finishedRun(run);
+      const loaded = await getRunStatus(runId);
+      if (!loaded.ok) return fail(loaded.speech);
+      const run = loaded.run;
+      const finished = loaded.finished;
       const documentUri = `agora://runs/${run.id}/document`;
       const link: CallToolResult['content'] = finished
         ? [{
@@ -385,7 +370,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
         }]
         : [];
       return result({
-        speech: finished ? 'That run has finished. The document is ready.' : 'That run is still going.',
+        speech: loaded.speech,
         status: 'ok',
         runId: run.id,
         runStatus: run.status,
@@ -453,7 +438,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     'ask_agora',
     {
       title: 'Ask the household',
-      description: 'Call for a household question that should be answered from saved memory, such as an allergy. This reply uses stored facts only and does not call a model or the web.',
+      description: 'Call for a household question, such as an allergy. Agora answers in a sentence or two from saved memory, and may check tasks, the briefing, or a run. It does not change anything.',
       inputSchema: z.object({
         question: z.string().describe('The question, in everyday words.'),
       }),
@@ -483,7 +468,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     'web_research',
     {
       title: 'Web research',
-      description: 'Call when a household question needs the public web, such as a current price or a news item. It is not configured yet, so it returns an error you can say aloud and does not invent sources.',
+      description: 'Call when a household question needs the public web, such as a current price. It returns a short answer and names the source. If web research is not set up, it says so and does not invent sources.',
       inputSchema: z.object({
         question: z.string().describe('What to look up on the web.'),
       }),
@@ -492,7 +477,8 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     },
     async ({ question }) => {
       const looked = await webResearch(question);
-      return fail(errorOf(looked) ?? 'Web research is not configured yet.');
+      if (!looked.ok) return fail(looked.speech || looked.error);
+      return result({ speech: looked.speech, status: 'ok' });
     },
   );
 

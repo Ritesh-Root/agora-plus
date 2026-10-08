@@ -3,6 +3,7 @@ import { readdir } from 'fs/promises';
 import path from 'path';
 import { WebSocket, type WebSocket as WsSocket } from 'ws';
 import type { ServerMessage } from '../shared/protocol';
+import { toSpeech } from './household/speech';
 import { getDataDir, readJson, writeJson, writeText } from './household/store';
 import { getHub } from './hub';
 import { publicModelError } from './modelError';
@@ -24,6 +25,8 @@ export interface RunRecord {
   tasks: { id: string; title: string; role: string; status: string }[];
   synthesis: string;
   wordCount: number;
+  /** Two spoken sentences for a finished household run. Room runs leave this unset. */
+  spokenSummary?: string;
 }
 
 export type StartRunResult = { ok: true; runId: string } | { ok: false; error: string };
@@ -118,10 +121,65 @@ function clearBoss(): void {
   waiting.clear();
 }
 
+function keeperFlag(tasks: { role: string; output?: string }[]): string {
+  return tasks
+    .filter((task) => task.role.trim().toLowerCase() === 'keeper')
+    .map((task) => task.output?.trim() ?? '')
+    .filter((text) => /\b(conflict|allerg(?:y|ic)?)\b/i.test(text))
+    .join(' ')
+    .slice(0, 500);
+}
+
+/** Keep a flagged allergy or conflict inside the two sentences someone will hear. */
+function withFlag(speech: string, flag: string): string {
+  if (!flag) return toSpeech(speech);
+  const allergy = /allerg/i.test(flag);
+  if (allergy && /allerg/i.test(speech)) return toSpeech(speech);
+  if (!allergy && /conflict/i.test(speech)) return toSpeech(speech);
+  const extra = toSpeech(flag, { maxSentences: 1, maxChars: 140 });
+  const base = toSpeech(speech, { maxSentences: 1, maxChars: 160 });
+  if (!extra) return base;
+  if (!base) return extra;
+  return `${base} ${extra}`.trim();
+}
+
+async function householdSpokenSummary(
+  source: RunRecord['source'],
+  provider: ServerProvider,
+  synthesis: string,
+  tasks: { role: string; output?: string }[],
+): Promise<string | undefined> {
+  if (source !== 'household') return undefined;
+  const flag = keeperFlag(tasks);
+  if (!synthesis.trim() && !flag) return undefined;
+  const fallback = withFlag(synthesis, flag);
+  try {
+    const named = provider as ServerProvider & { fastModel?: string };
+    const modelName = typeof named.fastModel === 'string' ? named.fastModel : undefined;
+    provider.prepareRequest({ stage: 'summary', agent: 'Agora', attempt: 1 });
+    const res = await provider.generateCompletion(
+      [{
+        role: 'user',
+        content: flag
+          ? `Summarize this for someone listening at home.\n\n${synthesis.slice(0, 4000)}\n\nKeeper flagged: ${flag}`
+          : `Summarize this for someone listening at home.\n\n${synthesis.slice(0, 4000)}`,
+      }],
+      undefined,
+      'Write a spoken summary in at most two short sentences. Mention any flagged household conflict, such as an allergy. Do not use Markdown.',
+      modelName,
+    );
+    const spoken = toSpeech(res.content ?? '');
+    if (!spoken) return fallback || undefined;
+    return withFlag(spoken, flag);
+  } catch {
+    return fallback || undefined;
+  }
+}
+
 async function persistFinished(
   runId: string,
   status: 'complete' | 'needs_revision' | 'stopped',
-  snapshot: { brief: string; tasks: RunRecord['tasks']; synthesis: string; wordCount: number },
+  snapshot: { brief: string; tasks: RunRecord['tasks']; synthesis: string; wordCount: number; spokenSummary?: string },
 ): Promise<void> {
   const meta = metas.get(runId);
   const record: RunRecord = {
@@ -135,6 +193,7 @@ async function persistFinished(
     synthesis: snapshot.synthesis,
     wordCount: snapshot.wordCount,
   };
+  if (snapshot.spokenSummary) record.spokenSummary = snapshot.spokenSummary;
   await writeText(`runs/${runId}.md`, snapshot.synthesis);
   await writeJson(`runs/${runId}.json`, record);
 }
@@ -142,7 +201,7 @@ async function persistFinished(
 async function saveQuietly(
   runId: string,
   status: 'complete' | 'needs_revision' | 'stopped',
-  snapshot: { brief: string; tasks: RunRecord['tasks']; synthesis: string; wordCount: number },
+  snapshot: { brief: string; tasks: RunRecord['tasks']; synthesis: string; wordCount: number; spokenSummary?: string },
 ): Promise<void> {
   try {
     await persistFinished(runId, status, snapshot);
@@ -321,11 +380,13 @@ export async function startSocietyRun(input: {
       deliver({ type: 'society-run-status', runId, status: 'stopped' });
       endRunStats();
       clearBoss();
+      const spokenSummary = await householdSpokenSummary(input.source, provider, result.synthesis, result.tasks);
       await saveQuietly(runId, 'stopped', {
         brief: result.brief,
         tasks: result.tasks.map((task) => ({ id: task.id, title: task.title, role: task.role, status: task.status })),
         synthesis: result.synthesis,
         wordCount: result.wordCount,
+        spokenSummary,
       });
       return;
     }
@@ -340,6 +401,7 @@ export async function startSocietyRun(input: {
       clearBoss();
       return;
     }
+    const spokenSummary = await householdSpokenSummary(input.source, provider, result.synthesis, result.tasks);
     const counted = provider.takeUsage();
     deliver({
       type: 'society-complete',
@@ -387,6 +449,7 @@ export async function startSocietyRun(input: {
       tasks: result.tasks.map((task) => ({ id: task.id, title: task.title, role: task.role, status: task.status })),
       synthesis: result.synthesis,
       wordCount: result.wordCount,
+      spokenSummary,
     });
   }).catch(async (err) => {
     endRunStats();
@@ -395,7 +458,9 @@ export async function startSocietyRun(input: {
       room.markStopped(runId);
       deliver({ type: 'society-run-status', runId, status: 'stopped' });
       deliver({ type: 'society-error', error: publicModelError(err) });
-      await saveQuietly(runId, 'stopped', roomSnapshot(runId, input.brief));
+      const snapshot = roomSnapshot(runId, input.brief);
+      const spokenSummary = await householdSpokenSummary(input.source, provider, snapshot.synthesis, snapshot.tasks);
+      await saveQuietly(runId, 'stopped', { ...snapshot, spokenSummary });
     }
   });
 

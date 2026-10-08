@@ -11,6 +11,7 @@ import { normalizeChatText } from './roomState';
 import { runRoomDiscussion } from './roomReply';
 import { runBenchmark } from './bench/runner';
 import { createRoutingProvider } from './routingProvider';
+import { getBedrock, serverLlmMode } from './llm/serverProvider';
 import { isFailed, resolveRoutedAccess } from './modelAccess';
 import { handleModelTest } from './modelTest';
 import { assertChatProxyTarget, MAX_PROXY_BODY } from './proxyGuard';
@@ -23,6 +24,8 @@ import { handleApiRoutes } from './routes';
  * Room chat needs only the speakers' endpoints, so one bad connection fails only that speaker.
  * A run or benchmark also calls the default connection for planning and review,
  * so it is rejected before it starts if the default or any agent connection failed.
+ * In Bedrock mode a missing browser key uses the server model instead.
+ * An agent whose own connection failed is still rejected.
  */
 async function providerFromClient(
   msg: { apiKey?: string; baseUrl?: string; agents?: unknown },
@@ -33,13 +36,15 @@ async function providerFromClient(
     baseUrl: msg.baseUrl,
     agents: readAgentAccess(msg.agents),
   });
+  const bedrock = serverLlmMode() === 'bedrock' ? getBedrock() : undefined;
   if (options.requireAll) {
-    const failed = [access.fallback, ...access.agents].find(isFailed);
-    if (failed) throw failed.error;
-  } else if (isFailed(access.fallback) && access.agents.length === 0) {
+    const failedAgent = access.agents.find((agent) => isFailed(agent));
+    if (failedAgent && isFailed(failedAgent)) throw failedAgent.error;
+    if (isFailed(access.fallback) && !bedrock) throw access.fallback.error;
+  } else if (isFailed(access.fallback) && access.agents.length === 0 && !bedrock) {
     throw access.fallback.error;
   }
-  return createRoutingProvider(access);
+  return createRoutingProvider(access, bedrock ? { fallbackProvider: bedrock } : undefined);
 }
 
 /** Forwards one caller-keyed chat completion. Never adds the server key. */

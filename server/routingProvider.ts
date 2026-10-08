@@ -2,10 +2,14 @@ import { isFailed, type RoutedAccess } from './modelAccess';
 import { createServerProvider, type ServerProvider } from './society/provider';
 
 /** One provider that picks an endpoint from the agent named in prepareRequest. */
-export function createRoutingProvider(access: RoutedAccess): ServerProvider {
+export function createRoutingProvider(
+  access: RoutedAccess,
+  options?: { fallbackProvider?: ServerProvider },
+): ServerProvider {
   const cache = new Map<string, ServerProvider>();
   const inners: ServerProvider[] = [];
   const request = { runId: '-', stage: 'call', agent: '-', attempt: 1 };
+  let fallbackAttached = false;
 
   function providerFor(apiKey: string, baseUrl?: string): ServerProvider {
     const cacheKey = `${apiKey}\n${baseUrl ?? ''}`;
@@ -36,6 +40,16 @@ export function createRoutingProvider(access: RoutedAccess): ServerProvider {
     },
     async generateCompletion(messages, tools, systemInstruction, modelName) {
       const route = access.agents.find((agent) => agent.name.toLowerCase() === request.agent.toLowerCase());
+      if (!route && isFailed(access.fallback)) {
+        const fallback = options?.fallbackProvider;
+        if (!fallback) throw access.fallback.error;
+        if (!fallbackAttached) {
+          inners.push(fallback);
+          fallbackAttached = true;
+        }
+        fallback.prepareRequest({ ...request });
+        return fallback.generateCompletion(messages, tools, systemInstruction, modelName);
+      }
       const endpoint = route ?? access.fallback;
       if (isFailed(endpoint)) throw endpoint.error;
       const inner = providerFor(endpoint.apiKey, endpoint.baseUrl);

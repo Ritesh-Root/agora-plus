@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assertPublicWebTarget } from '../proxyGuard';
-import { beginResearch, researchForTask, researchSearchCount, researchSources } from './research';
+import { beginResearch, quickResearch, researchForTask, researchSearchCount, researchSources } from './research';
 import { readUrl } from './readUrl';
 import type { DecisionRecord } from '../society/decider';
 
@@ -69,6 +69,38 @@ describe('research URL guard', () => {
       expect(blocked).toBe('');
     } finally {
       delete process.env.AGORA_DECIDER;
+    }
+  });
+
+  it('strips utm params and reads only the top two hits', async () => {
+    const saved = process.env.FIRECRAWL_API_KEY;
+    delete process.env.FIRECRAWL_API_KEY;
+    try {
+      const reads: string[] = [];
+      const found = await quickResearch('prices', {
+        search: async () => [
+          { title: 'A', url: 'https://example.com/a?utm_source=newsletter&id=1', snippet: 'a' },
+          { title: 'B', url: 'https://example.com/b?utm_medium=email', snippet: 'b' },
+          { title: 'C', url: 'https://example.com/c', snippet: 'c' },
+        ],
+        read: async (url) => {
+          reads.push(url);
+          return 'page body';
+        },
+      });
+      expect(reads).toEqual([
+        'https://example.com/a?id=1',
+        'https://example.com/b',
+      ]);
+      expect(found.sources).toEqual([
+        { title: 'A', url: 'https://example.com/a?id=1' },
+        { title: 'B', url: 'https://example.com/b' },
+      ]);
+      expect(found.context).toContain('page body');
+      expect(found.context).not.toContain('utm_');
+    } finally {
+      if (saved === undefined) delete process.env.FIRECRAWL_API_KEY;
+      else process.env.FIRECRAWL_API_KEY = saved;
     }
   });
 });

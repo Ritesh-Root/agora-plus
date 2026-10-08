@@ -1,6 +1,10 @@
-import { isFailed, resolveRoutedAccess } from '../modelAccess';
-import { listRecentRuns, startSocietyRun } from '../runEngine';
-import { createRoutingProvider } from '../routingProvider';
+import { getHub } from '../hub';
+import type { BedrockCreateParams, BedrockProvider } from '../llm/bedrockProvider';
+import { defaultServerProvider } from '../llm/serverProvider';
+import { runToolLoop, type ToolCreate, type ToolDefinition } from '../llm/toolLoop';
+import { listRecentRuns, getRunRecord, startSocietyRun, type RunRecord } from '../runEngine';
+import { quickResearch, researchConfigured, type ResearchSource } from '../research/research';
+import { planSociety, type SocietyTask } from '../society/Orchestrator';
 import type { ServerProvider } from '../society/provider';
 import { listPendingApprovals, registerApprovalHandler, requestApproval } from './approvals';
 import { buildBriefing } from './briefing';
@@ -28,15 +32,8 @@ export interface Receipt {
 
 type ProviderFactory = () => Promise<ServerProvider>;
 
-/** Server key only. Phase 3 replaces this factory with Bedrock. */
-let providerFactory: ProviderFactory = async () => {
-  const access = await resolveRoutedAccess({});
-  if (isFailed(access.fallback)) {
-    const reason = access.fallback.error;
-    throw reason instanceof Error ? reason : new Error('No server model is configured.');
-  }
-  return createRoutingProvider(access);
-};
+/** Bedrock when AGORA_SERVER_LLM=bedrock, otherwise the server API key. */
+let providerFactory: ProviderFactory = defaultServerProvider;
 
 export function setServerProviderFactory(fn: ProviderFactory): void {
   providerFactory = fn;
@@ -72,18 +69,42 @@ registerApprovalHandler('forget', async (payload) => {
   return { receipt: receipt('forget', id, verified) };
 });
 
+function asTasks(value: unknown): SocietyTask[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tasks: SocietyTask[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const title = typeof item.title === 'string' ? item.title.trim() : '';
+    const role = typeof item.role === 'string' ? item.role.trim() : '';
+    if (!title || !role) continue;
+    const prompt = typeof item.prompt === 'string' && item.prompt.trim() ? item.prompt : title;
+    const id = typeof item.id === 'string' && item.id.trim() ? item.id : `t${tasks.length + 1}`;
+    const deps = Array.isArray(item.deps)
+      ? item.deps.filter((dep): dep is string => typeof dep === 'string')
+      : undefined;
+    tasks.push({ id, title, role, prompt, deps });
+  }
+  return tasks.length > 0 ? tasks : undefined;
+}
+
 registerApprovalHandler('start_run', async (payload) => {
-  const goal = payload && typeof payload === 'object' && typeof (payload as { goal?: unknown }).goal === 'string'
-    ? (payload as { goal: string }).goal.trim()
-    : '';
+  const record = payload && typeof payload === 'object'
+    ? payload as { goal?: unknown; brief?: unknown; presetTasks?: unknown }
+    : {};
+  const goal = typeof record.goal === 'string' ? record.goal.trim() : '';
   if (!goal) throw new Error('A goal is required.');
   const memories = await searchMemory(goal);
+  const brief = typeof record.brief === 'string' && record.brief.trim()
+    ? record.brief
+    : householdBrief(goal, memories);
   const provider = await getServerProvider();
   return startSocietyRun({
-    brief: householdBrief(goal, memories),
+    brief,
     provider,
     team: HOUSEHOLD_TEAM,
     source: 'household',
+    presetTasks: asTasks(record.presetTasks),
   });
 });
 
@@ -175,40 +196,339 @@ export async function dailyBriefing() {
   return buildBriefing(await briefingInput());
 }
 
+const ASK_SYSTEM = [
+  "You are Agora, the household's assistant.",
+  'Answer in at most two short spoken sentences.',
+  'Never claim an action was done unless a tool result says so.',
+  'Say "I don\'t know" rather than guess.',
+  'When a web result was used, cite the source name.',
+].join(' ');
+
+const FAST_FALLBACK = 'anthropic.claude-haiku-4-5';
+const ASK_TIMEOUT_MS = 9_000;
+const RESEARCH_UNAVAILABLE = "Web research isn't set up on this server.";
+
+const READ_TOOLS: ToolDefinition[] = [
+  {
+    name: 'recall',
+    description: 'Search household memory for facts such as allergies and preferences.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'Words to look for.' } },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'list_tasks',
+    description: 'List household tasks. Omit status for every task.',
+    input_schema: {
+      type: 'object',
+      properties: { status: { type: 'string', enum: ['open', 'done'] } },
+    },
+  },
+  {
+    name: 'daily_briefing',
+    description: 'The morning briefing from due tasks, waiting approvals, and recent runs. It does not call a model.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_run_status',
+    description: 'Status of a household run. Omit runId for the latest run.',
+    input_schema: {
+      type: 'object',
+      properties: { runId: { type: 'string' } },
+    },
+  },
+];
+
+function askTools(): ToolDefinition[] {
+  if (!researchConfigured()) return READ_TOOLS;
+  return [
+    ...READ_TOOLS,
+    {
+      name: 'web_research',
+      description: 'Look up a current public fact when household memory is not enough.',
+      input_schema: {
+        type: 'object',
+        properties: { question: { type: 'string' } },
+        required: ['question'],
+      },
+    },
+  ];
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function inputRecord(input: unknown): Record<string, unknown> {
+  if (typeof input === 'string') {
+    try {
+      const parsed = JSON.parse(input) as unknown;
+      if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  if (input && typeof input === 'object') return input as Record<string, unknown>;
+  return {};
+}
+
+function inputString(input: Record<string, unknown>, key: string): string {
+  const value = input[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.flatMap((block) => {
+    if (!block || typeof block !== 'object') return [];
+    const item = block as { type?: unknown; text?: unknown };
+    return item.type === 'text' && typeof item.text === 'string' ? [item.text] : [];
+  }).join('');
+}
+
+function bedrockOf(provider: ServerProvider): BedrockProvider | null {
+  const named = provider as ServerProvider & Partial<Pick<BedrockProvider, 'createMessage' | 'fastModel'>>;
+  if (typeof named.createMessage !== 'function' || typeof named.fastModel !== 'string') return null;
+  return named as BedrockProvider;
+}
+
+function recallAnswer(memories: MemoryEntry[]) {
+  const best = memories[0];
+  const speech = best ? toSpeech(`I remember this: ${best.text}`) : "I don't know.";
+  return {
+    ok: true as const,
+    speech: speech || "I don't know.",
+    answer: speech || "I don't know.",
+    memories: memories.slice(0, 5),
+    toolCalls: [] as { name: string; input: unknown; ok: boolean; ms: number }[],
+  };
+}
+
+async function findRun(runId?: string): Promise<RunRecord | null> {
+  const requested = runId?.trim();
+  if (requested) return getRunRecord(requested);
+  const current = getHub().room.currentRun();
+  if (current) {
+    const live = await getRunRecord(current.id);
+    if (live) return live;
+  }
+  const recent = await listRecentRuns(1);
+  return recent[0] ?? null;
+}
+
+export async function getRunStatus(runId?: string) {
+  const requested = runId?.trim();
+  const run = await findRun(requested);
+  if (!run) {
+    const speech = requested ? 'I could not find that run.' : 'There is no household run yet.';
+    return { ok: false as const, error: speech, speech };
+  }
+  const finished = run.status === 'complete' || run.status === 'needs_revision' || run.status === 'stopped';
+  const speech = finished
+    ? (run.spokenSummary?.trim() || toSpeech(run.synthesis) || 'That run has finished. The document is ready.')
+    : 'That run is still going.';
+  return { ok: true as const, speech, run, finished };
+}
+
+function citeSources(speech: string, sources: ResearchSource[]): string {
+  const named = sources.filter((source) => source.title.trim());
+  if (named.length === 0) return speech;
+  const missing = named.filter((source) => !speech.toLowerCase().includes(source.title.toLowerCase()));
+  if (missing.length === 0) return speech;
+  const names = missing.slice(0, 2).map((source) => source.title).join(' and ');
+  return toSpeech(`${speech} Source: ${names}.`) || speech;
+}
+
+async function fastAnswer(system: string, user: string, create?: ToolCreate): Promise<string> {
+  if (create) {
+    const message = await create({
+      model: FAST_FALLBACK,
+      max_tokens: 1024,
+      system,
+      messages: [{ role: 'user', content: user }],
+    });
+    if (message.stop_reason === 'refusal') throw new Error('The model declined this request.');
+    return textOf(message.content);
+  }
+  const provider = await getServerProvider();
+  const bedrock = bedrockOf(provider);
+  const res = await provider.generateCompletion(
+    [{ role: 'user', content: user }],
+    undefined,
+    system,
+    bedrock?.fastModel,
+  );
+  return res.content ?? '';
+}
+
+async function executeAsk(name: string, input: unknown): Promise<unknown> {
+  const fields = inputRecord(input);
+  switch (name) {
+    case 'recall':
+      return recall(inputString(fields, 'query'));
+    case 'list_tasks': {
+      const status = fields.status === 'open' || fields.status === 'done' ? fields.status : undefined;
+      return listTasks(status);
+    }
+    case 'daily_briefing':
+      return dailyBriefing();
+    case 'get_run_status':
+      return getRunStatus(inputString(fields, 'runId') || undefined);
+    case 'web_research':
+      return webResearch(inputString(fields, 'question') || inputString(fields, 'query'));
+    default:
+      throw new Error(`Unknown tool: ${name}`);
+  }
+}
+
 /**
- * Phase 2: hold the goal for a yes. The preview is fixed text, not a model plan.
- * Phase 3 fills the preview from planSociety before the same approval.
+ * Plans with the household team, then waits for a yes.
+ * Approving starts that same task list. No second planning call.
  */
-export async function planAndRun(goal: string) {
+export async function requestRun(goal: string) {
   const trimmed = goal.trim();
   if (!trimmed) return { ok: false as const, error: 'A goal is required.' };
-  const preview = `Plan: ${clip(trimmed, 120)}. The household team starts only after you approve.`;
-  const approval = requestApproval('start_run', preview, { goal: trimmed });
+  const memories = await searchMemory(trimmed);
+  const brief = householdBrief(trimmed, memories);
+  let tasks: SocietyTask[] = [];
+  try {
+    const provider = await getServerProvider();
+    const planned = await planSociety(brief, provider, { team: HOUSEHOLD_TEAM });
+    tasks = planned.tasks;
+  } catch (error) {
+    // The run plans again after approval, so a failed preview only loses the step list.
+    console.warn('[household] plan preview failed:', error instanceof Error ? error.message.slice(0, 200) : 'unknown error');
+    tasks = [];
+  }
+  const summary = tasks.length > 0
+    ? `Plan: ${tasks.length} step${tasks.length === 1 ? '' : 's'} — ${tasks.map((task) => task.title).join('; ')}`
+    : `Plan: ${clip(trimmed, 120)}. The household team starts only after you approve.`;
+  const approval = requestApproval('start_run', summary, {
+    goal: trimmed,
+    brief,
+    ...(tasks.length > 0 ? { presetTasks: tasks } : {}),
+  });
   return {
     ok: true as const,
     status: 'needs_approval' as const,
     approvalId: approval.id,
     summary: approval.summary,
-    preview,
+    preview: approval.summary,
+    tasks: tasks.map((task) => ({ title: task.title, role: task.role })),
   };
 }
 
-/** Phase 2 answers from saved memory only. Phase 3 replaces this with the model tool loop. */
-export async function askAgora(question: string) {
+export async function planAndRun(goal: string) {
+  return requestRun(goal);
+}
+
+/** Fast-model tool loop. A missing model or a 9s timeout falls back to saved memory. */
+export async function askAgora(question: string, deps?: { create?: ToolCreate; model?: string }) {
   const trimmed = question.trim();
   if (!trimmed) return { ok: false as const, error: 'Ask a question about the household.' };
   const memories = await searchMemory(trimmed);
-  const best = memories[0];
-  const speech = best
-    ? toSpeech(`I remember this: ${best.text}`)
-    : 'I do not have anything saved about that yet.';
-  return { ok: true as const, speech, memories: memories.slice(0, 5) };
+  const top = memories.slice(0, 8);
+  const user = top.length
+    ? `Household memory:\n${top.map((entry) => `- ${entry.text}`).join('\n')}\n\nQuestion: ${trimmed}`
+    : `Question: ${trimmed}`;
+
+  let create = deps?.create;
+  let model = deps?.model || FAST_FALLBACK;
+  if (!create) {
+    try {
+      const bedrock = bedrockOf(await getServerProvider());
+      if (bedrock) {
+        model = deps?.model || bedrock.fastModel;
+        create = (params) => bedrock.createMessage({
+          model: params.model,
+          max_tokens: params.max_tokens,
+          system: params.system,
+          tools: params.tools as BedrockCreateParams['tools'],
+          messages: params.messages as BedrockCreateParams['messages'],
+        });
+      }
+    } catch {
+      create = undefined;
+    }
+  }
+  if (!create) return recallAnswer(memories);
+
+  const sources: ResearchSource[] = [];
+  const tools = askTools();
+  try {
+    const loop = await withTimeout(runToolLoop({
+      create,
+      model,
+      system: ASK_SYSTEM,
+      tools,
+      messages: [{ role: 'user', content: user }],
+      execute: async (name, input) => {
+        const value = await executeAsk(name, input);
+        if (name === 'web_research' && value && typeof value === 'object' && Array.isArray((value as { sources?: unknown }).sources)) {
+          for (const source of (value as { sources: ResearchSource[] }).sources) {
+            if (source && typeof source.url === 'string') sources.push({ title: String(source.title ?? ''), url: source.url });
+          }
+        }
+        return value;
+      },
+    }), ASK_TIMEOUT_MS);
+    if (loop.stopReason === 'refusal' || !loop.text.trim()) {
+      const fallback = recallAnswer(memories);
+      return { ...fallback, toolCalls: loop.toolCalls, ...(sources.length > 0 ? { sources } : {}) };
+    }
+    const speech = toSpeech(loop.text) || recallAnswer(memories).speech;
+    return {
+      ok: true as const,
+      speech,
+      answer: loop.text,
+      memories: memories.slice(0, 5),
+      toolCalls: loop.toolCalls,
+      ...(sources.length > 0 ? { sources } : {}),
+    };
+  } catch {
+    return recallAnswer(memories);
+  }
 }
 
-/** Phase 2 stub. Phase 3 calls Firecrawl or Exa. This does not touch the network. */
-export async function webResearch(question: string) {
-  if (!question.trim()) return { ok: false as const, error: 'Ask a question to research.' };
-  return { ok: false as const, error: 'Web research is not configured yet.' };
+/** Grounded web answer. Unconfigured servers say so and do not invent sources. */
+export async function webResearch(question: string, deps?: { create?: ToolCreate }) {
+  const trimmed = question.trim();
+  if (!trimmed) {
+    return { ok: false as const, status: 'error' as const, error: 'Ask a question to research.', speech: 'Ask a question to research.' };
+  }
+  if (!researchConfigured()) {
+    return { ok: false as const, status: 'error' as const, error: RESEARCH_UNAVAILABLE, speech: RESEARCH_UNAVAILABLE };
+  }
+  const found = await quickResearch(trimmed);
+  if (found.sources.length === 0 || !found.context.trim()) {
+    const speech = "I don't know.";
+    return { ok: true as const, status: 'ok' as const, speech, answer: speech, sources: found.sources };
+  }
+  const system = 'Answer using only the context below. Cite the source name. If the context does not say, say "I don\'t know." Use at most two short sentences.';
+  const user = `Context:\n${found.context}\n\nQuestion: ${trimmed}`;
+  try {
+    const text = await fastAnswer(system, user, deps?.create);
+    const speech = citeSources(toSpeech(text) || "I don't know.", found.sources);
+    return { ok: true as const, status: 'ok' as const, speech, answer: text || speech, sources: found.sources };
+  } catch {
+    const speech = citeSources(toSpeech(found.context) || "I don't know.", found.sources);
+    return { ok: true as const, status: 'ok' as const, speech, answer: speech, sources: found.sources };
+  }
 }
 
 export async function householdSnapshot() {

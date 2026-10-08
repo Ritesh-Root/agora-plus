@@ -6,8 +6,12 @@ import {
   householdSnapshot,
   remember,
   addTask,
+  setServerProviderFactory,
 } from './household/actions';
 import { resolveApproval } from './household/approvals';
+import { defaultServerProvider } from './llm/serverProvider';
+
+setServerProviderFactory(defaultServerProvider);
 
 const MAX_BODY = 64 * 1024;
 

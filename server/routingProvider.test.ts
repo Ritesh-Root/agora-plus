@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveRoutedAccess } from './modelAccess';
 import { createRoutingProvider } from './routingProvider';
+import type { ServerProvider } from './society/provider';
 
 const publicResolve = async () => ['93.184.216.34'];
 
@@ -60,5 +61,53 @@ describe('routed model access', () => {
     expect(seen[0].model).toBe('model-a');
     expect(seen[1].model).toBe('model-b');
     expect(seen.some((call) => call.key === 'Bearer fallback-key')).toBe(false);
+  });
+
+  it('uses fallbackProvider when the default connection failed and no agent route matches', async () => {
+    const fallback: ServerProvider = {
+      prepareRequest() {},
+      takeUsage() {
+        return { calls: 2, promptTokens: 3, completionTokens: 4, missingUsage: 0 };
+      },
+      async generateCompletion() {
+        return { content: 'from bedrock' };
+      },
+    };
+    const provider = createRoutingProvider({
+      fallback: { error: new Error('no key') },
+      agents: [],
+    }, { fallbackProvider: fallback });
+    provider.prepareRequest({ stage: 'worker', agent: 'Scout', attempt: 1 });
+    const result = await provider.generateCompletion([{ role: 'user', content: 'hi' }]);
+    expect(result.content).toBe('from bedrock');
+    expect(provider.takeUsage()).toMatchObject({ calls: 2, promptTokens: 3, completionTokens: 4 });
+  });
+
+  it('keeps an agent route when a fallback provider is also set', async () => {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({
+      choices: [{ message: { content: 'from agent' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    let fallbackCalls = 0;
+    const fallback: ServerProvider = {
+      prepareRequest() {},
+      takeUsage() {
+        return { calls: 0, promptTokens: 0, completionTokens: 0, missingUsage: 0 };
+      },
+      async generateCompletion() {
+        fallbackCalls += 1;
+        return { content: 'from bedrock' };
+      },
+    };
+    const provider = createRoutingProvider({
+      fallback: { error: new Error('no key') },
+      agents: [
+        { name: 'Writer', apiKey: 'key-b', baseUrl: 'https://b.example/v1/chat/completions', model: 'model-b' },
+      ],
+    }, { fallbackProvider: fallback });
+    provider.prepareRequest({ stage: 'worker', agent: 'Writer', attempt: 1 });
+    const result = await provider.generateCompletion([{ role: 'user', content: 'hi' }]);
+    expect(result.content).toBe('from agent');
+    expect(fallbackCalls).toBe(0);
   });
 });

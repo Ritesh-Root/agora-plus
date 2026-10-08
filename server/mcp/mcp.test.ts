@@ -33,6 +33,11 @@ const ENV_KEYS = [
   'AGORA_TOKEN_SECRET',
   'AGORA_HOUSEHOLD_PASSCODE',
   'AGORA_PUBLIC_URL',
+  'AGORA_SERVER_LLM',
+  'AGORA_DECIDER',
+  'DASHSCOPE_API_KEY',
+  'EXA_API_KEY',
+  'FIRECRAWL_API_KEY',
 ] as const;
 
 const savedEnv = new Map<string, string | undefined>();
@@ -102,6 +107,11 @@ beforeEach(async () => {
   process.env.AGORA_TOKEN_SECRET = 'token-secret';
   process.env.AGORA_HOUSEHOLD_PASSCODE = 'home-pass';
   delete process.env.AGORA_PUBLIC_URL;
+  delete process.env.AGORA_SERVER_LLM;
+  delete process.env.AGORA_DECIDER;
+  delete process.env.DASHSCOPE_API_KEY;
+  delete process.env.EXA_API_KEY;
+  delete process.env.FIRECRAWL_API_KEY;
   resetOauthState();
   clearPendingApprovals();
   dir = await mkdtemp(path.join(tmpdir(), 'agora-mcp-'));
@@ -217,7 +227,7 @@ describe('MCP endpoint', () => {
     const research = await connected.callTool({ name: 'web_research', arguments: { question: 'pasta prices' } });
     expect(research.isError).toBe(true);
     expect(structured(research).status).toBe('error');
-    expect(String((research.content[0] as { text?: string }).text ?? '')).toContain('not configured');
+    expect(String((research.content[0] as { text?: string }).text ?? '')).toContain("isn't set up");
 
     const briefing = await connected.callTool({ name: 'daily_briefing', arguments: {} });
     expect(briefing.isError).toBeUndefined();
