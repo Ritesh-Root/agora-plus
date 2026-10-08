@@ -8,16 +8,18 @@ import { planSociety, type SocietyTask } from '../society/Orchestrator';
 import type { ServerProvider } from '../society/provider';
 import { listPendingApprovals, registerApprovalHandler, requestApproval } from './approvals';
 import { buildBriefing } from './briefing';
+import { resolveDueText } from './clock';
 import {
-  addMemory,
+  answerRecall,
   listMemory,
   removeMemory,
+  saveMemory,
   searchMemory,
   updateMemory,
   type HouseholdSource,
   type MemoryEntry,
 } from './memoryStore';
-import { addTask as createTask, completeTask as finishTask, listTasks as readTasks } from './taskStore';
+import { addTask as createTask, completeTask as finishTask, listTasks as readTasks, type TaskFields } from './taskStore';
 import { toSpeech } from './speech';
 import { HOUSEHOLD_TEAM } from './team';
 
@@ -108,20 +110,21 @@ registerApprovalHandler('start_run', async (payload) => {
   });
 });
 
-export async function remember(text: string, tags: string[] | undefined, source: HouseholdSource) {
+export async function remember(text: string, tags: string[] | undefined, source: HouseholdSource, who?: string) {
   const trimmed = text.trim();
   if (!trimmed) return { ok: false as const, error: 'Memory text is required.' };
-  const entry = await addMemory(trimmed, tags ?? [], source);
-  const back = (await listMemory()).find((item) => item.id === entry.id);
+  const saved = await saveMemory(trimmed, tags ?? [], source, who);
+  const back = (await listMemory()).find((item) => item.id === saved.entry.id);
   return {
     ok: true as const,
-    memory: entry,
-    receipt: receipt('remember', entry.id, !!back && back.text === entry.text),
+    memory: saved.entry,
+    created: saved.created,
+    receipt: receipt('remember', saved.entry.id, !!back && back.text === saved.entry.text),
   };
 }
 
 export async function recall(query: string) {
-  return { memories: await searchMemory(query) };
+  return answerRecall(query);
 }
 
 export async function forget(memoryIdOrQuery: string) {
@@ -159,10 +162,16 @@ export async function deleteMemory(id: string) {
   return { ok: true as const, memory: removed, receipt: receipt('delete_memory', id, verified) };
 }
 
-export async function addTask(title: string, due: string | undefined, source: HouseholdSource) {
+export async function addTask(title: string, due: string | undefined, source: HouseholdSource, fields?: TaskFields) {
   const trimmed = title.trim();
   if (!trimmed) return { ok: false as const, error: 'A task title is required.' };
-  const task = await createTask(trimmed, due?.trim() || undefined, source);
+  const dueAt = fields?.dueAt?.trim();
+  if (dueAt && !Number.isFinite(Date.parse(dueAt))) return { ok: false as const, error: 'A reminder time must be a date.' };
+  const task = await createTask(trimmed, resolveDueText(due, new Date()), source, {
+    who: fields?.who,
+    list: fields?.list,
+    dueAt,
+  });
   const back = (await readTasks()).find((item) => item.id === task.id);
   return {
     ok: true as const,
@@ -171,8 +180,12 @@ export async function addTask(title: string, due: string | undefined, source: Ho
   };
 }
 
-export async function listTasks(status?: 'open' | 'done') {
-  return { tasks: await readTasks(status) };
+export async function listTasks(status?: 'open' | 'done', list?: string) {
+  let tasks = await readTasks(status);
+  const named = list?.trim().toLowerCase();
+  if (named === 'main') tasks = tasks.filter((task) => !task.list);
+  else if (named) tasks = tasks.filter((task) => (task.list ?? '').toLowerCase() === named);
+  return { tasks };
 }
 
 export async function completeTask(idOrTitle: string) {
@@ -207,6 +220,13 @@ const ASK_SYSTEM = [
 const FAST_FALLBACK = 'anthropic.claude-haiku-4-5';
 const ASK_TIMEOUT_MS = 9_000;
 const RESEARCH_UNAVAILABLE = "Web research isn't set up on this server.";
+
+let researchLookup: typeof quickResearch = quickResearch;
+
+/** Tests swap the lookup so a configured key does not call the network. */
+export function setResearchLookup(fn: typeof quickResearch): void {
+  researchLookup = fn;
+}
 
 const READ_TOOLS: ToolDefinition[] = [
   {
@@ -514,7 +534,7 @@ export async function webResearch(question: string, deps?: { create?: ToolCreate
   if (!researchConfigured()) {
     return { ok: false as const, status: 'error' as const, error: RESEARCH_UNAVAILABLE, speech: RESEARCH_UNAVAILABLE };
   }
-  const found = await quickResearch(trimmed);
+  const found = await researchLookup(trimmed);
   if (found.sources.length === 0 || !found.context.trim()) {
     const speech = "I don't know.";
     return { ok: true as const, status: 'ok' as const, speech, answer: speech, sources: found.sources };

@@ -1,7 +1,7 @@
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDataDir } from './store';
 import { addTask, completeTask, listTasks } from './taskStore';
 
@@ -33,5 +33,41 @@ describe('taskStore', () => {
     expect(byTitle?.status).toBe('done');
     const again = await completeTask('Buy Bread');
     expect(again).toEqual(byTitle);
+  });
+
+  it('stores who, list, and dueAt, and still loads a task file without them', async () => {
+    const call = await addTask('Call Grandma', 'at 6pm', 'voice', {
+      who: 'Jen',
+      list: 'shopping',
+      dueAt: '2026-10-08T18:00:00-07:00',
+    });
+    expect(call).toMatchObject({ who: 'Jen', list: 'shopping', dueAt: '2026-10-08T18:00:00-07:00', due: 'at 6pm' });
+    await writeFile(path.join(dir, 'tasks.json'), JSON.stringify([{
+      id: 'old',
+      title: 'Old bins',
+      status: 'open',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      source: 'ui',
+    }]));
+    const loaded = await listTasks();
+    expect(loaded.map((task) => task.title)).toEqual(['Old bins']);
+    expect(loaded[0]?.list).toBeUndefined();
+    expect(loaded[0]?.dueAt).toBeUndefined();
+  });
+
+  it('moves a corrupt task file aside so the next add does not erase it', async () => {
+    await writeFile(path.join(dir, 'tasks.json'), '{');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await listTasks()).toEqual([]);
+    expect(await listTasks()).toEqual([]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    const names = await readdir(dir);
+    const aside = names.find((name) => name.startsWith('tasks.json.corrupt-'));
+    expect(await readFile(path.join(dir, aside ?? ''), 'utf8')).toBe('{');
+    await addTask('Buy milk', undefined, 'ui');
+    const fresh = JSON.parse(await readFile(path.join(dir, 'tasks.json'), 'utf8')) as { title: string }[];
+    expect(fresh.map((task) => task.title)).toEqual(['Buy milk']);
+    expect(await readFile(path.join(dir, aside ?? ''), 'utf8')).toBe('{');
+    errors.mockRestore();
   });
 });

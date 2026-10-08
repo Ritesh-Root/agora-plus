@@ -59,6 +59,61 @@ export async function readJson<T>(name: string, fallback: T): Promise<T> {
   }
 }
 
+const loggedCorrupt = new Set<string>();
+
+/**
+ * Read a household JSON file on the same queue as its writes.
+ * A missing file is undefined. Corrupt JSON, or a value the caller rejects,
+ * is renamed to `<name>.corrupt-<timestamp>.json`, logged once, and returned
+ * as undefined so the next write can create a fresh file without erasing it.
+ */
+export async function loadJsonFile(name: string, acceptable: (value: unknown) => boolean): Promise<unknown | undefined> {
+  const file = resolveSafe(name);
+  let loaded: unknown | undefined;
+  await enqueue(file, async () => {
+    let text: string;
+    try {
+      text = await readFile(file, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      await moveAside(file, name, 'unreadable');
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text) as unknown;
+    } catch {
+      await moveAside(file, name, 'not valid JSON');
+      return;
+    }
+    if (!acceptable(parsed)) {
+      await moveAside(file, name, 'the wrong shape');
+      return;
+    }
+    loaded = parsed;
+  });
+  return loaded;
+}
+
+async function moveAside(file: string, name: string, reason: string): Promise<void> {
+  const stamp = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomBytes(3).toString('hex')}`;
+  const asideName = `${name}.corrupt-${stamp}.json`;
+  const aside = resolveSafe(asideName);
+  try {
+    await rename(file, aside);
+  } catch (error) {
+    if (loggedCorrupt.has(file)) return;
+    loggedCorrupt.add(file);
+    const detail = error instanceof Error ? error.message : 'unknown error';
+    console.error(`[household] ${name} was ${reason} and could not be moved aside: ${detail}`);
+    return;
+  }
+  if (!loggedCorrupt.has(file)) {
+    console.error(`[household] ${name} was ${reason} and was moved aside to ${asideName}.`);
+  }
+  loggedCorrupt.add(file);
+}
+
 export async function writeJson(name: string, data: unknown): Promise<void> {
   const file = resolveSafe(name);
   const body = JSON.stringify(data);

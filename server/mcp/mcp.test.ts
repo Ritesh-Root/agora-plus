@@ -1,13 +1,17 @@
 import { createServer, type Server } from 'http';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, readFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { Client } from '@modelcontextprotocol/client';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setResearchLookup, setServerProviderFactory } from '../household/actions';
 import { clearPendingApprovals } from '../household/approvals';
 import { listMemory } from '../household/memoryStore';
 import { setDataDir, writeJson } from '../household/store';
+import { defaultServerProvider } from '../llm/serverProvider';
+import { quickResearch } from '../research/research';
+import type { ServerProvider } from '../society/provider';
 import { handleMcpRoutes } from './http';
 import { resetOauthState } from './oauth';
 
@@ -23,7 +27,6 @@ const TOOLS = [
   'plan_and_run',
   'recall',
   'remember',
-  'web_research',
 ];
 
 const ENV_KEYS = [
@@ -132,6 +135,8 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
   resetOauthState();
   clearPendingApprovals();
+  setResearchLookup(quickResearch);
+  setServerProviderFactory(defaultServerProvider);
   for (const [key, value] of savedEnv) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -170,6 +175,15 @@ describe('MCP endpoint', () => {
       expect(tool.outputSchema?.properties).toHaveProperty('speech');
       expect(tool.outputSchema?.properties).toHaveProperty('status');
     }
+    expect(listed.tools.some((tool) => tool.name === 'web_research')).toBe(false);
+    expect(JSON.stringify(listed.tools.find((tool) => tool.name === 'remember')?.inputSchema)).toContain('"who"');
+    expect(JSON.stringify(listed.tools.find((tool) => tool.name === 'add_task')?.inputSchema)).toContain('"dueAt"');
+    expect(JSON.stringify(listed.tools.find((tool) => tool.name === 'add_task')?.inputSchema)).toContain('"list"');
+    expect(JSON.stringify(listed.tools.find((tool) => tool.name === 'list_tasks')?.inputSchema)).toContain('"list"');
+    expect(JSON.stringify(listed.tools.find((tool) => tool.name === 'recall')?.outputSchema)).toContain('"who"');
+    expect(JSON.stringify(listed.tools.find((tool) => tool.name === 'complete_task')?.outputSchema)).toContain('"dueAt"');
+    const caps = connected.getServerCapabilities() as { extensions?: Record<string, { mimeTypes?: string[] }> } | undefined;
+    expect(caps?.extensions?.['io.modelcontextprotocol/ui']?.mimeTypes).toContain('text/html;profile=mcp-app');
   });
 
   it('remembers, recalls, and forgets only after approval', async () => {
@@ -212,7 +226,7 @@ describe('MCP endpoint', () => {
     const token = await serviceToken();
     const connected = await connect(token);
     const listed = await connected.listTools();
-    expect(listed.tools).toHaveLength(12);
+    expect(listed.tools).toHaveLength(11);
     await expect(connected.callTool({ name: 'recall', arguments: { query: 'milk' } })).rejects.toThrow(/mcp:tools/);
   });
 
@@ -224,10 +238,8 @@ describe('MCP endpoint', () => {
     expect(typeof structured(plan).approvalId).toBe('string');
     expect(String(structured(plan).preview)).toContain('Plan dinners this week');
 
-    const research = await connected.callTool({ name: 'web_research', arguments: { question: 'pasta prices' } });
-    expect(research.isError).toBe(true);
-    expect(structured(research).status).toBe('error');
-    expect(String((research.content[0] as { text?: string }).text ?? '')).toContain("isn't set up");
+    const names = (await connected.listTools()).tools.map((tool) => tool.name);
+    expect(names).not.toContain('web_research');
 
     const briefing = await connected.callTool({ name: 'daily_briefing', arguments: {} });
     expect(briefing.isError).toBeUndefined();
@@ -265,6 +277,94 @@ describe('MCP endpoint', () => {
     const answer = await connected.callTool({ name: 'ask_agora', arguments: { question: 'What is Mia allergic to?' } });
     expect(answer.isError).toBeUndefined();
     expect(String((answer.content[0] as { text?: string }).text ?? '')).toContain('peanuts');
+
+    const day = await connected.callTool({ name: 'daily_briefing', arguments: {} });
+    expect(String(structured(day).speech)).toContain('Remember: Mia is allergic to peanuts');
+    const dayMeta = day._meta as { ui?: { resourceUri?: string; invoking?: string; invoked?: string } } | undefined;
+    expect(dayMeta?.ui?.resourceUri).toBe('ui://daily_briefing/household-card.html');
+    expect(dayMeta?.ui?.invoking).toBeTruthy();
+    expect(dayMeta?.ui?.invoked).toBeTruthy();
+  });
+
+  it('keeps one copy of a fact, names who, and does not call a finished task the first open task', async () => {
+    const connected = await connect('dev-token');
+    const saved = await connected.callTool({
+      name: 'remember',
+      arguments: { fact: 'Mia is allergic to peanuts' },
+    });
+    expect((structured(saved).memory as { who?: string }).who).toBe('Mia');
+    const again = await connected.callTool({
+      name: 'remember',
+      arguments: { fact: 'Mia is allergic to peanuts.' },
+    });
+    expect(String(structured(again).speech)).toContain('already remember');
+    expect(await listMemory()).toHaveLength(1);
+
+    await connected.callTool({ name: 'add_task', arguments: { title: 'Old milk', list: 'shopping' } });
+    await connected.callTool({ name: 'complete_task', arguments: { taskIdOrTitle: 'Old milk' } });
+    const done = await connected.callTool({ name: 'list_tasks', arguments: { list: 'shopping' } });
+    expect(String(structured(done).speech)).toContain('no open tasks');
+    expect(String(structured(done).speech)).not.toContain('First is');
+    expect((structured(done).tasks as { list?: string; status?: string }[])[0]).toMatchObject({
+      list: 'shopping',
+      status: 'done',
+    });
+    const taskMeta = done._meta as { ui?: { resourceUri?: string } } | undefined;
+    expect(taskMeta?.ui?.resourceUri).toBe('ui://daily_briefing/household-card.html');
+  });
+
+  it('returns source links from web research only when a key is configured', async () => {
+    process.env.EXA_API_KEY = 'test-key';
+    setResearchLookup(async () => ({
+      sources: [{ title: 'Market price', url: 'https://example.com/pasta' }],
+      context: 'Pasta costs two dollars.',
+    }));
+    const provider: ServerProvider = {
+      prepareRequest() {},
+      takeUsage() {
+        return { calls: 0, promptTokens: 0, completionTokens: 0, missingUsage: 0 };
+      },
+      async generateCompletion() {
+        return { content: 'Pasta costs two dollars.' };
+      },
+    };
+    setServerProviderFactory(async () => provider);
+    const connected = await connect('dev-token');
+    const listed = await connected.listTools();
+    expect(listed.tools.map((tool) => tool.name)).toContain('web_research');
+    expect(JSON.stringify(listed.tools.find((tool) => tool.name === 'web_research')?.outputSchema)).toContain('"url"');
+    const research = await connected.callTool({ name: 'web_research', arguments: { question: 'pasta prices' } });
+    expect(research.isError).toBeUndefined();
+    expect(structured(research).sources).toEqual([{ title: 'Market price', url: 'https://example.com/pasta' }]);
+    expect(String(structured(research).speech)).not.toMatch(/https?:/);
+    expect(String((research.content[0] as { text?: string }).text ?? '')).not.toMatch(/https?:/);
+  });
+
+  it('turns on account linking and keeps the store listing in household language', async () => {
+    const addon = JSON.parse(await readFile(new URL('../../alexa-addon/addon.json', import.meta.url), 'utf8')) as {
+      accountLinking: {
+        enabled: boolean;
+        type: string;
+        pkce: string;
+        scopes: string[];
+        authorizationUrl: string;
+        accessTokenUrl: string;
+      };
+      storeListing: { locales: { 'en-US': { shortDescription: string; fullDescription: string; examplePhrases: string[] } } };
+    };
+    expect(addon.accountLinking).toMatchObject({
+      enabled: true,
+      type: 'AUTHORIZATION_CODE',
+      pkce: 'S256',
+      scopes: ['mcp:tools', 'mcp:resources'],
+      authorizationUrl: 'https://<host>/oauth/authorize',
+      accessTokenUrl: 'https://<host>/oauth/token',
+    });
+    const locale = addon.storeListing.locales['en-US'];
+    const prose = `${locale.shortDescription}\n${locale.fullDescription}\n${locale.examplePhrases.join('\n')}`;
+    expect(prose).not.toMatch(/\b(MCP|server|API)\b/);
+    expect(prose).not.toMatch(/\b(remember|recall|forget|add_task|list_tasks|complete_task|daily_briefing|plan_and_run|approve_action|ask_agora|get_run_status|web_research)\b/);
+    expect(addon.accountLinking.authorizationUrl).toContain('<host>');
   });
 
   it('serves the household card and links it from the briefing', async () => {

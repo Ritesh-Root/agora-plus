@@ -1,4 +1,5 @@
 import {
+  EXTENSION_ID,
   registerAppResource,
   registerAppTool,
   RESOURCE_MIME_TYPE,
@@ -27,6 +28,7 @@ import {
 import { listPendingApprovals, resolveApproval } from '../household/approvals';
 import { memoryMarkdown } from '../household/memoryStore';
 import { toSpeech } from '../household/speech';
+import { researchConfigured } from '../research/research';
 import { getRunRecord, listRecentRuns } from '../runEngine';
 import { HOUSEHOLD_CARD_URI, loadHouseholdCardHtml } from './apps/cardHtml';
 
@@ -64,7 +66,7 @@ function spoken(text: string): string {
 
 function result(
   fields: Record<string, unknown> & { speech: string; status: ToolStatus },
-  options?: { isError?: boolean; extra?: CallToolResult['content'] },
+  options?: { isError?: boolean; extra?: CallToolResult['content']; meta?: CallToolResult['_meta'] },
 ): CallToolResult {
   const speech = spoken(fields.speech);
   const structured: Record<string, unknown> = {};
@@ -74,6 +76,7 @@ function result(
   return {
     content: [{ type: 'text', text: speech }, ...(options?.extra ?? [])],
     structuredContent: structured,
+    ...(options?.meta ? { _meta: options.meta } : {}),
     ...(options?.isError ? { isError: true as const } : {}),
   };
 }
@@ -97,23 +100,81 @@ function asReceipt(value: unknown): Receipt | undefined {
   return { action: item.action, id: item.id, verified: item.verified, at: item.at };
 }
 
+const memorySchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  tags: z.array(z.string()),
+  who: z.string().optional().describe('The person this fact is about.'),
+});
+
+const taskSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.enum(['open', 'done']),
+  due: z.string().optional(),
+  who: z.string().optional().describe('The person who owns the task.'),
+  list: z.string().optional().describe('Named list such as shopping. Absent means the main to-do list.'),
+  dueAt: z.string().optional().describe('ISO 8601 reminder time with a numeric offset.'),
+});
+
 function memoryView(entries: { id: string; text: string; tags: string[] }[]) {
   return entries.map((entry) => ({ id: entry.id, text: entry.text, tags: entry.tags }));
 }
 
-function taskView(tasks: { id: string; title: string; status: 'open' | 'done'; due?: string }[]) {
+function memoryRecord(entries: { id: string; text: string; tags: string[]; who?: string }[]) {
+  return entries.map((entry) => {
+    const view: { id: string; text: string; tags: string[]; who?: string } = {
+      id: entry.id,
+      text: entry.text,
+      tags: entry.tags,
+    };
+    if (entry.who) view.who = entry.who;
+    return view;
+  });
+}
+
+function taskView(tasks: { id: string; title: string; status: 'open' | 'done'; due?: string; who?: string; list?: string; dueAt?: string }[]) {
   return tasks.map((task) => {
-    const view: { id: string; title: string; status: 'open' | 'done'; due?: string } = {
+    const view: { id: string; title: string; status: 'open' | 'done'; due?: string; who?: string; list?: string; dueAt?: string } = {
       id: task.id,
       title: task.title,
       status: task.status,
     };
     if (task.due) view.due = task.due;
+    if (task.who) view.who = task.who;
+    if (task.list) view.list = task.list;
+    if (task.dueAt) view.dueAt = task.dueAt;
     return view;
   });
 }
 
+function taskListSpeech(tasks: { title: string; status: 'open' | 'done' }[], list?: string): string {
+  if (tasks.length === 0) {
+    return list === 'shopping' ? 'The shopping list is empty.' : 'There are no tasks.';
+  }
+  const openTasks = tasks.filter((task) => task.status === 'open');
+  if (openTasks.length === 0) {
+    const finished = tasks.length === 1 ? '1 is finished.' : `${tasks.length} are finished.`;
+    return `There are no open tasks. ${finished}`;
+  }
+  const first = openTasks[0];
+  if (list === 'shopping') {
+    return openTasks.length === 1
+      ? `On the shopping list: ${first.title}.`
+      : `There are ${openTasks.length} on the shopping list. First is ${first.title}.`;
+  }
+  return `There are ${openTasks.length} open tasks. First is ${first.title}.`;
+}
+
 const cardUi = { ui: { resourceUri: HOUSEHOLD_CARD_URI } };
+
+const cardResultMeta: CallToolResult['_meta'] = {
+  ui: {
+    resourceUri: HOUSEHOLD_CARD_URI,
+    invoking: 'Opening your household card.',
+    invoked: 'Your household card is ready.',
+  },
+};
 
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const writeSafe = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
@@ -125,7 +186,14 @@ const writeSafe = { readOnlyHint: false, destructiveHint: false, idempotentHint:
 export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer {
   const server = new McpServer(
     { name: 'agora-plus', version: '0.1.0' },
-    { instructions: INSTRUCTIONS },
+    {
+      instructions: INSTRUCTIONS,
+      capabilities: {
+        extensions: {
+          [EXTENSION_ID]: { mimeTypes: [RESOURCE_MIME_TYPE] },
+        },
+      },
+    },
   );
   // clientId is also on each tool call as ctx.http.authInfo, set from the bearer token.
   void ctx.clientId;
@@ -138,19 +206,26 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       inputSchema: z.object({
         fact: z.string().describe('The fact to keep, in the words the person used.'),
         tags: z.array(z.string()).optional().describe('Optional labels such as allergy or preference.'),
+        who: z.string().optional().describe('The person this fact is about. Inferred from a leading name when omitted.'),
       }),
-      outputSchema: toolOutput({}),
+      outputSchema: toolOutput({
+        memory: memorySchema.optional(),
+      }),
       annotations: writeSafe,
     },
-    async ({ fact, tags }) => {
-      const saved = await remember(fact, tags, 'mcp');
+    async ({ fact, tags, who }) => {
+      const saved = await remember(fact, tags, 'mcp', who);
       const message = errorOf(saved);
       if (message) return fail(message);
       if (!saved.ok) return fail('That fact could not be saved.');
+      const speech = saved.created
+        ? `I'll remember that ${saved.memory.text}`
+        : `I already remember that ${saved.memory.text}`;
       return result({
-        speech: `I'll remember that ${saved.memory.text}`,
+        speech,
         status: 'ok',
         receipt: saved.receipt,
+        memory: memoryRecord([saved.memory])[0],
       });
     },
   );
@@ -159,27 +234,21 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     'recall',
     {
       title: 'Recall household memory',
-      description: 'Call when someone asks what the household already knows. It returns the closest saved facts and the spoken reply names the best match. An empty query returns the newest facts. It does not change anything.',
+      description: 'Call when someone asks what the household already knows. It returns the closest saved facts. Two equal matches are both spoken, a partial match is unsure, and a named person is preferred. An empty query returns the newest facts. It does not change anything.',
       inputSchema: z.object({
         query: z.string().optional().describe('Words to look for. Leave empty for the newest facts.'),
       }),
       outputSchema: toolOutput({
-        memories: z.array(z.object({
-          id: z.string(),
-          text: z.string(),
-          tags: z.array(z.string()),
-        })).optional(),
+        memories: z.array(memorySchema).optional(),
       }),
       annotations: readOnly,
     },
     async ({ query }) => {
       const found = await recall(query ?? '');
-      const memories = memoryView(found.memories.slice(0, 5));
-      const best = memories[0];
       return result({
-        speech: best ? `The best match is ${best.text}` : 'I do not have anything saved about that.',
+        speech: found.speech,
         status: 'ok',
-        memories,
+        memories: memoryRecord(found.memories),
       });
     },
   );
@@ -221,13 +290,18 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       description: 'Call when someone wants a household to-do saved. It stores the task and returns a receipt. It does not start a plan.',
       inputSchema: z.object({
         title: z.string().describe('What needs doing, as a short title.'),
-        due: z.string().optional().describe('Optional due time, ideally YYYY-MM-DD.'),
+        due: z.string().optional().describe('Optional due time, ideally YYYY-MM-DD. "today" uses the household time zone.'),
+        who: z.string().optional().describe('The person who owns the task.'),
+        list: z.string().optional().describe('Named list such as shopping. Omit it for the main to-do list.'),
+        dueAt: z.string().optional().describe('ISO 8601 reminder time with a numeric offset.'),
       }),
-      outputSchema: toolOutput({}),
+      outputSchema: toolOutput({
+        task: taskSchema.optional(),
+      }),
       annotations: writeSafe,
     },
-    async ({ title, due }) => {
-      const saved = await addTask(title, due, 'mcp');
+    async ({ title, due, who, list, dueAt }) => {
+      const saved = await addTask(title, due, 'mcp', { who, list, dueAt });
       const message = errorOf(saved);
       if (message) return fail(message);
       if (!saved.ok) return fail('That task could not be saved.');
@@ -235,6 +309,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
         speech: `Added ${saved.task.title}.`,
         status: 'ok',
         receipt: saved.receipt,
+        task: taskView([saved.task])[0],
       });
     },
   );
@@ -247,29 +322,21 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       description: 'Call when someone asks what is on the household list. It returns open tasks, finished tasks, or both, and the spoken reply gives the count. It does not change anything.',
       inputSchema: z.object({
         status: z.enum(['open', 'done']).optional().describe('Filter to open or done. Leave empty for both.'),
+        list: z.string().optional().describe('A named list such as shopping, or main for the to-do list. Leave empty for every list.'),
       }),
       _meta: cardUi,
       outputSchema: toolOutput({
-        tasks: z.array(z.object({
-          id: z.string(),
-          title: z.string(),
-          status: z.enum(['open', 'done']),
-          due: z.string().optional(),
-        })).optional(),
+        tasks: z.array(taskSchema).optional(),
       }),
       annotations: readOnly,
     },
-    async ({ status }) => {
-      const found = await listTasks(status);
+    async ({ status, list }) => {
+      const found = await listTasks(status, list);
       const tasks = taskView(found.tasks);
-      const open = tasks.filter((task) => task.status === 'open').length;
-      const first = tasks.find((task) => task.status === 'open') ?? tasks[0];
-      const speech = tasks.length === 0
-        ? 'There are no tasks.'
-        : first
-          ? `There are ${open} open tasks. First is ${first.title}.`
-          : `There are ${tasks.length} tasks.`;
-      return result({ speech, status: 'ok', tasks });
+      return result(
+        { speech: taskListSpeech(tasks, list), status: 'ok', tasks },
+        { meta: cardResultMeta },
+      );
     },
   );
 
@@ -281,7 +348,9 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       inputSchema: z.object({
         taskIdOrTitle: z.string().describe('The task id, or the title in any capitalization.'),
       }),
-      outputSchema: toolOutput({}),
+      outputSchema: toolOutput({
+        task: taskSchema.optional(),
+      }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ taskIdOrTitle }) => {
@@ -293,6 +362,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
         speech: `${saved.task.title} is done.`,
         status: 'ok',
         receipt: saved.receipt,
+        task: taskView([saved.task])[0],
       });
     },
   );
@@ -326,7 +396,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
           id: action.id,
           summary: action.summary,
         })),
-      });
+      }, { meta: cardResultMeta });
     },
   );
 
@@ -485,23 +555,34 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     },
   );
 
-  server.registerTool(
-    'web_research',
-    {
-      title: 'Web research',
-      description: 'Call when a household question needs the public web, such as a current price. It returns a short answer and names the source. If web research is not set up, it says so and does not invent sources.',
-      inputSchema: z.object({
-        question: z.string().describe('What to look up on the web.'),
-      }),
-      outputSchema: toolOutput({}),
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    },
-    async ({ question }) => {
-      const looked = await webResearch(question);
-      if (!looked.ok) return fail(looked.speech || looked.error);
-      return result({ speech: looked.speech, status: 'ok' });
-    },
-  );
+  if (researchConfigured()) {
+    server.registerTool(
+      'web_research',
+      {
+        title: 'Web research',
+        description: 'Call when a household question needs the public web, such as a current price. It returns a short answer and the source links. It does not read the links aloud.',
+        inputSchema: z.object({
+          question: z.string().describe('What to look up on the web.'),
+        }),
+        outputSchema: toolOutput({
+          sources: z.array(z.object({
+            title: z.string(),
+            url: z.string(),
+          })).optional().describe('Pages the answer came from. The spoken reply names a title and leaves the link on screen.'),
+        }),
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      },
+      async ({ question }) => {
+        const looked = await webResearch(question);
+        if (!looked.ok) return fail(looked.speech || looked.error);
+        return result({
+          speech: looked.speech,
+          status: 'ok',
+          sources: looked.sources.map((source) => ({ title: source.title, url: source.url })),
+        });
+      },
+    );
+  }
 
   registerAppResource(
     server,

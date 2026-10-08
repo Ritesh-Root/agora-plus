@@ -1,18 +1,18 @@
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getRunRecord } from '../runEngine';
 import { defaultServerProvider } from '../llm/serverProvider';
 import type { ServerProvider } from '../society/provider';
-import { askAgora, requestRun, setServerProviderFactory } from './actions';
+import { addTask, dailyBriefing, householdSnapshot, recall, remember, requestRun, setServerProviderFactory, askAgora } from './actions';
 import { clearPendingApprovals, resolveApproval } from './approvals';
 import { addMemory } from './memoryStore';
 import { setDataDir } from './store';
 
 let dir = '';
 const saved = new Map<string, string | undefined>();
-const ENV = ['AGORA_SERVER_LLM', 'AGORA_DECIDER', 'DASHSCOPE_API_KEY', 'EXA_API_KEY', 'FIRECRAWL_API_KEY'] as const;
+const ENV = ['AGORA_SERVER_LLM', 'AGORA_DECIDER', 'DASHSCOPE_API_KEY', 'EXA_API_KEY', 'FIRECRAWL_API_KEY', 'AGORA_TIMEZONE'] as const;
 
 beforeEach(async () => {
   for (const key of ENV) saved.set(key, process.env[key]);
@@ -30,6 +30,47 @@ afterEach(async () => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+});
+
+describe('household memory and tasks', () => {
+  it('remembers a person once, recalls a tie as two facts, and keeps due today in the household zone', async () => {
+    process.env.AGORA_TIMEZONE = 'America/Los_Angeles';
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-08T20:00:00.000Z'));
+    try {
+      const first = await remember('Mia is allergic to peanuts', ['allergy'], 'voice');
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      expect(first.memory.who).toBe('Mia');
+      expect(first.created).toBe(true);
+      const again = await remember('mia is allergic to peanuts.', [], 'ui');
+      expect(again.ok).toBe(true);
+      if (!again.ok) return;
+      expect(again.created).toBe(false);
+      expect(again.memory.id).toBe(first.memory.id);
+
+      await remember('Mia is allergic to shellfish', [], 'voice');
+      const both = await recall('allergic');
+      expect(both.speech).toContain('peanuts');
+      expect(both.speech).toContain('shellfish');
+
+      const saved = await addTask('Take the bins out', 'due today', 'ui', { list: 'shopping', who: 'Jen' });
+      expect(saved.ok).toBe(true);
+      if (!saved.ok) return;
+      expect(saved.task.due).toBe('2026-10-08');
+      expect(saved.task.list).toBe('shopping');
+      expect(saved.task.who).toBe('Jen');
+      const snap = await householdSnapshot();
+      expect(snap.memory.some((entry) => entry.who === 'Mia')).toBe(true);
+      expect(snap.tasks.some((task) => task.list === 'shopping' && task.who === 'Jen')).toBe(true);
+      const day = await dailyBriefing();
+      expect(day.speech).toContain('Remember:');
+      expect(day.speech).toContain('allergic');
+      expect(day.speech).toContain('due today');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('askAgora', () => {
