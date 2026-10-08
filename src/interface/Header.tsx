@@ -237,21 +237,25 @@ const Header: React.FC = () => {
           <button
             data-testid="household-btn"
             onClick={() => setHouseholdOpen(true)}
-            className="text-zinc-500 hover:text-ink transition-colors p-1 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-butter-600"
+            className="inline-flex min-h-6 items-center gap-1 rounded-md p-1 text-zinc-600 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             title="Household"
             type="button"
+            aria-label="Household"
           >
-            <House size={16} />
+            <House size={16} aria-hidden="true" />
+            <span className="hidden text-[10px] font-black uppercase tracking-wider lg:inline">Household</span>
           </button>
           <a
             data-testid="voice-sim-btn"
             href="/alexa"
             target="_blank"
             rel="noopener"
-            className="text-zinc-500 hover:text-ink transition-colors p-1 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-butter-600"
-            title="Voice simulator"
+            className="inline-flex min-h-6 items-center gap-1 rounded-md p-1 text-zinc-600 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            title="Voice simulator, opens a new tab"
+            aria-label="Voice, opens a new tab"
           >
-            <Mic size={16} />
+            <Mic size={16} aria-hidden="true" />
+            <span className="hidden text-[10px] font-black uppercase tracking-wider lg:inline">Voice</span>
           </a>
           <button
             data-testid="fullscreen-btn"

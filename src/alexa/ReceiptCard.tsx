@@ -51,6 +51,9 @@ export function ReceiptCard({
         </span>
       </div>
       {card.speech ? <p className="mt-2 text-sm leading-snug text-paper">{card.speech}</p> : null}
+      {card.summary && card.summary !== card.speech ? (
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-snug text-paper">{card.summary}</p>
+      ) : null}
       {card.receipt ? (
         <p className="mt-2 text-[11px] tabular-nums text-paper/70">
           {card.receipt.verified ? 'verified ✓' : 'not verified'}
@@ -60,9 +63,7 @@ export function ReceiptCard({
         <p className="mt-2 text-[11px] tabular-nums text-paper/70">{card.ms} ms</p>
       ) : null}
       {card.status === 'needs_approval' && showActions ? (
-        <div className="mt-3">
-          <p className="text-sm text-paper">{card.summary || card.speech}</p>
-          <div className="mt-2 flex gap-2">
+        <div className="mt-3 flex gap-2">
             <button
               type="button"
               disabled={busy}
@@ -79,7 +80,6 @@ export function ReceiptCard({
             >
               Decline
             </button>
-          </div>
         </div>
       ) : null}
     </article>

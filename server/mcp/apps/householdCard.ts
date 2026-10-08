@@ -5,6 +5,7 @@ import {
   applyHostStyleVariables,
   type McpUiHostContext,
 } from '@modelcontextprotocol/ext-apps';
+import { describeTask, failedCardState } from './householdCardState';
 
 interface El {
   textContent: string;
@@ -28,6 +29,9 @@ interface TaskItem {
   id: string;
   title: string;
   due?: string;
+  dueAt?: string;
+  who?: string;
+  list?: string;
 }
 
 interface ApprovalItem {
@@ -76,6 +80,9 @@ function tasksOf(value: unknown): TaskItem[] | null {
     if (row.status !== 'open') continue;
     const task: TaskItem = { id: row.id, title: row.title };
     if (typeof row.due === 'string' && row.due) task.due = row.due;
+    if (typeof row.dueAt === 'string' && row.dueAt) task.dueAt = row.dueAt;
+    if (typeof row.who === 'string' && row.who) task.who = row.who;
+    if (typeof row.list === 'string' && row.list) task.list = row.list;
     tasks.push(task);
   }
   return tasks;
@@ -163,7 +170,16 @@ function button(label: string, kind: 'primary' | 'quiet', onClick: () => void): 
 }
 
 function taskLine(task: TaskItem): string {
-  return task.due ? `${task.title} (due ${task.due})` : task.title;
+  return describeTask(task);
+}
+
+function applyFailure(message: string): void {
+  const failed = failedCardState(message);
+  state.speech = failed.speech;
+  state.items = failed.items;
+  state.tasks = failed.tasks;
+  state.approvals = failed.approvals;
+  state.note = failed.note;
 }
 
 function render(): void {
@@ -227,12 +243,20 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<{ 
 }
 
 async function refresh(): Promise<void> {
-  const [briefing, tasks] = await Promise.all([
-    callTool('daily_briefing', {}),
-    callTool('list_tasks', { status: 'open' }),
-  ]);
+  let briefing: { ok: boolean; speech: string; content?: unknown };
+  let tasks: { ok: boolean; speech: string; content?: unknown };
+  try {
+    [briefing, tasks] = await Promise.all([
+      callTool('daily_briefing', {}),
+      callTool('list_tasks', { status: 'open' }),
+    ]);
+  } catch {
+    applyFailure('The household could not be loaded.');
+    render();
+    return;
+  }
   if (!briefing.ok || !tasks.ok) {
-    state.note = briefing.speech || tasks.speech || 'The household could not be loaded.';
+    applyFailure(briefing.speech || tasks.speech || 'The household could not be loaded.');
     render();
     return;
   }
@@ -250,12 +274,14 @@ async function markDone(id: string): Promise<void> {
     const result = await callTool('complete_task', { taskIdOrTitle: id });
     if (!result.ok) {
       state.note = result.speech || 'That task could not be completed.';
+      state.speech = state.note;
       return;
     }
     await refresh();
     if (!state.note) state.note = result.speech;
   } catch {
     state.note = 'The host could not reach the household.';
+    state.speech = state.note;
   } finally {
     busy = false;
     render();
@@ -270,12 +296,14 @@ async function decide(id: string, decision: 'approve' | 'reject'): Promise<void>
     const result = await callTool('approve_action', { approvalId: id, decision });
     if (!result.ok) {
       state.note = result.speech || 'That approval could not be resolved.';
+      state.speech = state.note;
       return;
     }
     await refresh();
     if (!state.note) state.note = result.speech;
   } catch {
     state.note = 'The host could not reach the household.';
+    state.speech = state.note;
   } finally {
     busy = false;
     render();
@@ -284,7 +312,12 @@ async function decide(id: string, decision: 'approve' | 'reject'): Promise<void>
 
 void app.connect().then(async () => {
   paint(app.getHostContext());
-  await refresh();
+  try {
+    await refresh();
+  } catch {
+    applyFailure('The household could not be loaded.');
+    render();
+  }
 }).catch(() => {
   state.speech = 'This card opens inside an MCP Apps host.';
   state.items = [];

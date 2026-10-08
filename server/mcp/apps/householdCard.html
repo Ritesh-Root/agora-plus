@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https:; font-src https: data:; img-src data: https:; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Household</title>
 <style>
   :root {
@@ -102,7 +103,7 @@
 <body>
 <main>
   <h1>Household</h1>
-  <p id="speech">Loading the household…</p>
+  <p id="speech" aria-live="polite">Loading the household…</p>
   <section>
     <h2>Briefing</h2>
     <ul id="items"></ul>
