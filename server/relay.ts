@@ -14,7 +14,9 @@ import { createRoutingProvider } from './routingProvider';
 import { getBedrock, serverLlmMode } from './llm/serverProvider';
 import { isFailed, resolveRoutedAccess } from './modelAccess';
 import { handleModelTest } from './modelTest';
-import { assertChatProxyTarget, MAX_PROXY_BODY } from './proxyGuard';
+import { householdLockEnabled, householdSessionActive } from './household/session';
+import { noteBindHost } from './hub';
+import { assertChatProxyTarget, fetchPinned, MAX_PROXY_BODY } from './proxyGuard';
 import { getHub } from './hub';
 import { forwardSocietyEvent, startSocietyRun } from './runEngine';
 import { warmAcknowledgements } from './alexaSim/tts';
@@ -48,10 +50,29 @@ async function providerFromClient(
   return createRoutingProvider(access, bedrock ? { fallbackProvider: bedrock } : undefined);
 }
 
+/** True when a household passcode is set and this request has no session cookie. */
+export function relayUpgradeAllowed(req: IncomingMessage): boolean {
+  if (!householdLockEnabled()) return true;
+  return householdSessionActive(req);
+}
+
+function devBindHost(host: string | boolean | undefined): string {
+  if (host === true) return '0.0.0.0';
+  if (typeof host === 'string' && host.length > 0) return host;
+  return '127.0.0.1';
+}
+
 /** Forwards one caller-keyed chat completion. Never adds the server key. */
 export function handleCorsProxy(req: IncomingMessage, res: ServerResponse): boolean {
   const pathname = (req.url ?? '').split('?')[0];
   if (pathname !== '/api/cors-proxy') return false;
+
+  if (!relayUpgradeAllowed(req)) {
+    if (typeof req.resume === 'function') req.resume();
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'household_locked' }));
+    return true;
+  }
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
@@ -110,11 +131,10 @@ export function handleCorsProxy(req: IncomingMessage, res: ServerResponse): bool
         Authorization: authorization,
       };
       if (req.headers.accept) headers.Accept = req.headers.accept as string;
-      const response = await fetch(url, {
+      const response = await fetchPinned(url, {
         method: 'POST',
         headers,
         body: Buffer.concat(chunks),
-        redirect: 'error',
       });
       const text = await response.text();
       if (settled) return;
@@ -155,6 +175,11 @@ export function relayPlugin(): Plugin {
   return {
     name: 'agora-relay',
     configureServer(server: ViteDevServer) {
+      const host = devBindHost(server.config.server.host);
+      noteBindHost(host);
+      if (host === '0.0.0.0' && !process.env.DEMO_HOST_SECRET?.trim() && !householdLockEnabled()) {
+        console.warn('[agora] Bound to every interface without DEMO_HOST_SECRET or AGORA_HOUSEHOLD_PASSCODE. The room has no host.');
+      }
       server.middlewares.use((req, res, next) => {
         if (handleCorsProxy(req, res) || handleModelTest(req, res) || handleApiRoutes(req, res) || handleMcpRoutes(req, res)) return;
         next();
@@ -182,6 +207,7 @@ export function attachRelay(httpServer: Server): void {
       };
 
       wss = new WebSocketServer({ noServer: true });
+      const upgradeSession = new WeakMap<WsSocket, boolean>();
 
       // Route upgrades by path: claim /__relay, ignore the rest so Vite's HMR works.
       httpServer.on('upgrade', (req, socket, head) => {
@@ -192,7 +218,16 @@ export function attachRelay(httpServer: Server): void {
           pathname = req.url ?? '';
         }
         if (pathname !== RELAY_PATH) return; // not ours — leave it for Vite/others
-        wss!.handleUpgrade(req, socket, head, (ws) => wss!.emit('connection', ws, req));
+        if (!relayUpgradeAllowed(req)) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        const sessionHost = householdLockEnabled() && householdSessionActive(req);
+        wss!.handleUpgrade(req, socket, head, (ws) => {
+          upgradeSession.set(ws, sessionHost);
+          wss!.emit('connection', ws, req);
+        });
       });
 
       wss.on('connection', (ws: WsSocket) => {
@@ -221,7 +256,7 @@ export function attachRelay(httpServer: Server): void {
               const resumeToken = typeof msg.resumeToken === 'string' ? msg.resumeToken : undefined;
               const hostCode = typeof msg.hostCode === 'string' ? msg.hostCode : undefined;
               const id = resumeId && room.canResume(resumeId, resumeToken) ? resumeId : randomUUID();
-              const result = room.join(id, msg.name, msg.color, resumeToken, hostCode);
+              const result = room.join(id, msg.name, msg.color, resumeToken, hostCode, upgradeSession.get(ws) === true);
               if (!result.ok) {
                 const { reason } = result as { ok: false; reason: 'room-full' };
                 send(ws, { type: reason });

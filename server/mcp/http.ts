@@ -3,8 +3,10 @@ import { toNodeHandler, type NodeIncomingMessageLike } from '@modelcontextprotoc
 import type { IncomingMessage, ServerResponse } from 'http';
 import { buildAgoraMcpServer } from './server';
 import {
+  ensureRefreshes,
   handleOAuthRequest,
   mcpResourceUrl,
+  rejectWithoutPublicUrl,
   resourcesMatch,
   verifyBearer,
   type BearerIdentity,
@@ -181,12 +183,22 @@ function authInfo(req: IncomingMessage, identity: BearerIdentity): AuthInfo {
 }
 
 async function serveMcp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (rejectWithoutPublicUrl(req, res)) return;
   if (!originAllowed(req)) {
     if (!res.headersSent) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Origin is not allowed.');
     }
     if (typeof req.resume === 'function') req.resume();
+    return;
+  }
+  try {
+    await ensureRefreshes();
+  } catch {
+    if (!res.headersSent && !res.writableEnded) {
+      res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ error: 'server_error', error_description: 'Refresh records could not be read.' }));
+    }
     return;
   }
   const identity = verifyBearer(req.headers.authorization);

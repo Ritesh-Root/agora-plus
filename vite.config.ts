@@ -11,6 +11,7 @@ export default defineConfig(({mode}) => {
   const serverNames = [
     'DASHSCOPE_API_KEY', 'TYPESAFE_API_KEY', 'JEV_API_KEY', 'TYPESAFE_BASE_URL', 'JEV_MODEL', 'EXA_API_KEY',
     'FIRECRAWL_API_KEY', 'ALEXA_SIM_MODEL', 'ALEXA_SIM_FAST_PATH',
+    'DEMO_HOST_SECRET', 'SOCIETY_REPLAY', 'BENCH_REPLAY', 'DISABLE_HMR',
   ];
   const serverPrefixes = ['AGORA_', 'AWS_', 'BEDROCK_', 'POLLY_'];
   for (const [name, value] of Object.entries(env)) {

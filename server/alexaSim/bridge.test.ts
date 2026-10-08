@@ -38,7 +38,7 @@ function parseSse(text: string): { event: string; data: Record<string, unknown> 
 
 beforeEach(async () => {
   for (const key of ENV) saved.set(key, process.env[key]);
-  process.env.AGORA_MCP_TOKEN = 'dev-token';
+  process.env.AGORA_MCP_TOKEN = 'dev-token-0123456789abcdef012345';
   delete process.env.ALEXA_SIM_FAST_PATH;
   delete process.env.AGORA_SELF_URL;
   delete process.env.AGORA_HOUSEHOLD_PASSCODE;

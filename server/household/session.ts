@@ -10,6 +10,16 @@ import type { IncomingMessage, ServerResponse } from 'http';
 const COOKIE = 'agora_household';
 const MAX_AGE_SECONDS = 12 * 60 * 60;
 const FAIL_DELAY_MS = 250;
+const MISS_LIMIT = 5;
+const BLOCK_MS = 15 * 60 * 1000;
+
+interface Miss {
+  count: number;
+  blockedUntil: number;
+}
+
+const misses = new Map<string, Miss>();
+let passcodeNow = (): number => Date.now();
 
 interface SessionPayload {
   exp: number;
@@ -22,6 +32,61 @@ function secret(): string {
 
 export function householdLockEnabled(): boolean {
   return Boolean(process.env.AGORA_HOUSEHOLD_PASSCODE?.trim());
+}
+
+/** Loopback only. Mapped IPv4 (`::ffff:127.0.0.1`) counts as loopback. */
+export function isLoopbackAddress(address: string): boolean {
+  const normalized = address.toLowerCase().replace(/^::ffff:/, '');
+  return normalized === '127.0.0.1' || normalized === '::1';
+}
+
+/** True when the TCP peer is loopback. A missing address is not loopback. */
+export function requestFromLoopback(req: IncomingMessage): boolean {
+  const remote = req.socket?.remoteAddress;
+  if (!remote) return false;
+  return isLoopbackAddress(remote);
+}
+
+export function setPasscodeClock(next: (() => number) | null): void {
+  passcodeNow = next ?? (() => Date.now());
+}
+
+export function resetPasscodeLimiter(): void {
+  misses.clear();
+  passcodeNow = () => Date.now();
+}
+
+export function passcodeClientKey(req: IncomingMessage): string {
+  const raw = req.socket?.remoteAddress ?? 'unknown';
+  return raw.toLowerCase().replace(/^::ffff:/, '');
+}
+
+/** True while this address is inside the 15 minute lockout. */
+export function passcodeBlocked(key: string, now = passcodeNow()): boolean {
+  const item = misses.get(key);
+  if (!item || item.blockedUntil <= 0) return false;
+  if (item.blockedUntil > now) return true;
+  misses.delete(key);
+  return false;
+}
+
+/**
+ * Counts one wrong passcode. The fifth miss blocks the address.
+ * Returns true when the address is now blocked.
+ */
+export function recordPasscodeMiss(key: string, now = passcodeNow()): boolean {
+  if (passcodeBlocked(key, now)) return true;
+  const item = misses.get(key) ?? { count: 0, blockedUntil: 0 };
+  item.count += 1;
+  if (item.count >= MISS_LIMIT) {
+    item.blockedUntil = now + BLOCK_MS;
+  }
+  misses.set(key, item);
+  return item.blockedUntil > now;
+}
+
+export function clearPasscodeMisses(key: string): void {
+  misses.delete(key);
 }
 
 function safeEqual(left: string, right: string): boolean {
@@ -78,9 +143,11 @@ export function householdSessionActive(req: IncomingMessage, now = Date.now()): 
 }
 
 function requestIsHttps(req: IncomingMessage): boolean {
-  const forwarded = req.headers['x-forwarded-proto'];
-  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  if (raw?.split(',')[0]?.trim() === 'https') return true;
+  if (process.env.AGORA_TRUST_PROXY === '1') {
+    const forwarded = req.headers['x-forwarded-proto'];
+    const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    if (raw?.split(',')[0]?.trim() === 'https') return true;
+  }
   return (req.socket as { encrypted?: boolean } | undefined)?.encrypted === true;
 }
 
@@ -134,11 +201,21 @@ export async function handleSession(req: IncomingMessage, res: ServerResponse, p
   }
   const expected = process.env.AGORA_HOUSEHOLD_PASSCODE ?? '';
   const given = passcode ?? '';
+  const key = passcodeClientKey(req);
+  if (passcodeBlocked(key)) {
+    sendJson(res, 429, { error: 'Too many attempts. Try again in 15 minutes.' });
+    return;
+  }
   if (!safeEqual(given, expected)) {
+    if (recordPasscodeMiss(key)) {
+      sendJson(res, 429, { error: 'Too many attempts. Try again in 15 minutes.' });
+      return;
+    }
     await delay(FAIL_DELAY_MS);
     sendJson(res, 401, { error: 'invalid_passcode' });
     return;
   }
+  clearPasscodeMisses(key);
   const token = sign({ exp: Date.now() + MAX_AGE_SECONDS * 1000, purpose: 'household' });
   sendJson(res, 200, { required: true, active: true }, cookieHeader(token, req, MAX_AGE_SECONDS));
 }

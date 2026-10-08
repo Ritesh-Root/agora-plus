@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeChatText, RoomState } from './roomState';
+import { normalizeChatText, RoomState, setRoomNetworkOpen } from './roomState';
 
 describe('public room chat', () => {
   it('drops empty and oversized messages', () => {
@@ -75,6 +75,21 @@ describe('room run', () => {
     expect(room.currentRun()?.synthesis).toBe('');
     expect(room.finishRun(second.run.id, { status: 'complete', synthesis: 'new', wordCount: 1 })).toBe(true);
     expect(room.currentRun()?.synthesis).toBe('new');
+  });
+
+  it('keeps the host seat for a household session when the process is on the network', () => {
+    setRoomNetworkOpen(true);
+    try {
+      const room = new RoomState();
+      const first = room.join('a', 'Ada', '#111');
+      expect(first.ok && first.info.isHost).toBe(false);
+      const session = room.join('b', 'Bea', '#222', undefined, undefined, true);
+      expect(session.ok && session.info.isHost).toBe(true);
+      const next = room.join('c', 'Cam', '#333', undefined, undefined, true);
+      expect(next.ok && next.info.isHost).toBe(false);
+    } finally {
+      setRoomNetworkOpen(false);
+    }
   });
 
   it('does not grant host from a display name when a demo secret is set', () => {

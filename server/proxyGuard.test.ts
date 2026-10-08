@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertChatProxyTarget, assertPublicHttpsTarget, isPrivateAddress } from './proxyGuard';
+import { assertChatProxyTarget, assertPublicHttpsTarget, fetchPinned, isPrivateAddress, pinLookup, pinnedAddresses } from './proxyGuard';
 
 const publicResolve = async () => ['93.184.216.34'];
 
@@ -24,6 +24,30 @@ describe('proxy target guard', () => {
     expect(url.pathname).toBe('/v1/chat/completions');
     await expect(assertChatProxyTarget('https://example.com/secret', publicResolve)).rejects.toThrow(/not allowed/);
     await expect(assertChatProxyTarget('https://169.254.169.254/v1/chat/completions', publicResolve)).rejects.toThrow(/not allowed/);
+  });
+
+  it('connects only to the addresses the guard checked', async () => {
+    const url = await assertPublicHttpsTarget('https://example.com/v1/chat/completions', publicResolve);
+    expect(pinnedAddresses(url)).toEqual(['93.184.216.34']);
+    await new Promise<void>((resolve, reject) => {
+      pinLookup(pinnedAddresses(url) ?? [])('example.com', {}, (err, address, family) => {
+        try {
+          expect(err).toBeNull();
+          expect(address).toBe('93.184.216.34');
+          expect(family).toBe(4);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    const response = await fetchPinned(url, { method: 'POST' }, async (request) => {
+      expect(request.addresses).toEqual(['93.184.216.34']);
+      expect(request.url.hostname).toBe('example.com');
+      return new Response('ok', { status: 200 });
+    });
+    expect(response.status).toBe(200);
+    await expect(fetchPinned(new URL('https://example.com/other'), {}, async () => new Response('no'))).rejects.toThrow(/not allowed/);
   });
 
   it('rejects non-https, localhost, and private DNS answers', async () => {

@@ -1,5 +1,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import type { IncomingMessage, ServerResponse } from 'http';
+import { readJson, writeJson } from '../household/store';
+import { clearPasscodeMisses, passcodeBlocked, passcodeClientKey, recordPasscodeMiss } from '../household/session';
+import { processOnLoopback } from '../hub';
 
 /**
  * One-household OAuth 2.1 authorization server.
@@ -16,6 +19,8 @@ const ACCESS_SECONDS = 3600;
 const REFRESH_SECONDS = 30 * 24 * 60 * 60;
 const CODE_MS = 5 * 60 * 1000;
 const MAX_STORED = 100;
+const MIN_SECRET = 32;
+const REFRESH_FILE = 'oauth-refreshes.json';
 
 export interface BearerIdentity {
   clientId: string;
@@ -32,6 +37,7 @@ interface SignedPayload {
   exp: number;
   typ: 'access' | 'refresh';
   jti: string;
+  gen: number;
 }
 
 interface AuthCode {
@@ -49,28 +55,169 @@ interface RefreshRecord {
   exp: number;
 }
 
+interface RefreshFile {
+  records: Record<string, RefreshRecord>;
+  generation: Record<string, number>;
+}
+
 const codes = new Map<string, AuthCode>();
 const refreshes = new Map<string, RefreshRecord>();
+const generations = new Map<string, number>();
 let clock = (): number => Date.now();
+let refreshesLoaded = false;
+let refreshLoad: Promise<void> | null = null;
+let refreshWrite: Promise<void> = Promise.resolve();
+let loggedShortSecret = false;
+let loggedShortDev = false;
+let loggedIgnoredDev = false;
+let loggedOpenBind = false;
 
 /** Tests move time without waiting for a token to expire. */
 export function setOauthClock(next: (() => number) | null): void {
   clock = next ?? (() => Date.now());
 }
 
-/** Drops codes and refresh tokens. Does not change environment variables. */
+/** Drops codes and refresh tokens in memory. Does not change environment variables. */
 export function resetOauthState(): void {
   codes.clear();
   refreshes.clear();
+  generations.clear();
+  refreshesLoaded = true;
+  refreshLoad = null;
   clock = () => Date.now();
+  loggedShortSecret = false;
+  loggedShortDev = false;
+  loggedIgnoredDev = false;
+  loggedOpenBind = false;
+}
+
+function isRefreshRecord(value: unknown): value is RefreshRecord {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.sub === 'string' && item.sub.length > 0
+    && typeof item.scope === 'string' && item.scope.length > 0
+    && typeof item.aud === 'string' && item.aud.length > 0
+    && typeof item.exp === 'number';
+}
+
+function applyRefreshFile(data: unknown): void {
+  if (!data || typeof data !== 'object') return;
+  const body = data as { records?: unknown; generation?: unknown };
+  const records = body.records && typeof body.records === 'object' ? body.records as Record<string, unknown> : null;
+  const generation = body.generation && typeof body.generation === 'object' ? body.generation as Record<string, unknown> : null;
+  if (records) {
+    for (const [jti, value] of Object.entries(records)) {
+      if (isRefreshRecord(value)) refreshes.set(jti, value);
+    }
+  }
+  if (generation) {
+    for (const [sub, value] of Object.entries(generation)) {
+      if (typeof value === 'number' && Number.isInteger(value) && value >= 0) generations.set(sub, value);
+    }
+  }
+}
+
+export async function ensureRefreshes(): Promise<void> {
+  if (refreshesLoaded) return;
+  if (!refreshLoad) {
+    refreshLoad = (async () => {
+      try {
+        const data = await readJson<unknown>(REFRESH_FILE, { records: {}, generation: {} });
+        applyRefreshFile(data);
+        refreshesLoaded = true;
+      } catch (error) {
+        console.error('[oauth] Could not read refresh records.', error instanceof Error ? error.message : '');
+        throw error;
+      } finally {
+        refreshLoad = null;
+      }
+    })();
+  }
+  await refreshLoad;
+}
+
+function persistRefreshes(): void {
+  const body: RefreshFile = {
+    records: Object.fromEntries(refreshes),
+    generation: Object.fromEntries(generations),
+  };
+  refreshWrite = refreshWrite.then(() => writeJson(REFRESH_FILE, body).catch((error) => {
+    console.error('[oauth] Could not save refresh records.', error instanceof Error ? error.message : '');
+  }));
+}
+
+/** Tests wait until the refresh file has been written. */
+export function flushOauthWrites(): Promise<void> {
+  return refreshWrite;
+}
+
+/** Clears memory and loads the refresh file again. Used to simulate a restart. */
+export async function reloadOauthFromDisk(): Promise<void> {
+  await refreshWrite;
+  codes.clear();
+  refreshes.clear();
+  generations.clear();
+  refreshesLoaded = false;
+  await ensureRefreshes();
+}
+
+function currentGen(sub: string): number {
+  return generations.get(sub) ?? 0;
+}
+
+function revokeSubject(sub: string): void {
+  for (const [jti, record] of refreshes) {
+    if (record.sub === sub) refreshes.delete(jti);
+  }
+  generations.set(sub, currentGen(sub) + 1);
+  persistRefreshes();
 }
 
 export function oauthReady(): boolean {
+  const secret = process.env.AGORA_TOKEN_SECRET ?? '';
+  if (secret.length > 0 && secret.length < MIN_SECRET && !loggedShortSecret) {
+    loggedShortSecret = true;
+    console.error('[oauth] AGORA_TOKEN_SECRET is shorter than 32 characters. OAuth is disabled.');
+  }
   return Boolean(
     process.env.AGORA_OAUTH_CLIENT_ID?.trim()
     && process.env.AGORA_OAUTH_CLIENT_SECRET
-    && process.env.AGORA_TOKEN_SECRET,
+    && secret.length >= MIN_SECRET,
   );
+}
+
+/**
+ * The development bearer, or null when it must not be accepted.
+ * A short value is ignored. Production and an https public URL ignore it
+ * unless AGORA_ALLOW_DEV_TOKEN=1. The value is never logged.
+ */
+export function acceptedDevToken(): string | null {
+  const token = process.env.AGORA_MCP_TOKEN?.trim() ?? '';
+  if (!token) return null;
+  if (token.length < MIN_SECRET) {
+    if (!loggedShortDev) {
+      loggedShortDev = true;
+      console.error('[oauth] AGORA_MCP_TOKEN is shorter than 32 characters and will be ignored.');
+    }
+    return null;
+  }
+  let httpsPublic = false;
+  const raw = process.env.AGORA_PUBLIC_URL?.trim() ?? '';
+  if (raw) {
+    try {
+      httpsPublic = new URL(raw).protocol === 'https:';
+    } catch {
+      httpsPublic = false;
+    }
+  }
+  if ((process.env.NODE_ENV === 'production' || httpsPublic) && process.env.AGORA_ALLOW_DEV_TOKEN !== '1') {
+    if (!loggedIgnoredDev) {
+      loggedIgnoredDev = true;
+      console.error('[oauth] AGORA_MCP_TOKEN is ignored because NODE_ENV is production or AGORA_PUBLIC_URL is https. Set AGORA_ALLOW_DEV_TOKEN=1 to use it.');
+    }
+    return null;
+  }
+  return token;
 }
 
 function clientId(): string {
@@ -96,11 +243,36 @@ function publicBase(req: IncomingMessage): string {
   if (configured) return configured;
   const hostHeader = req.headers.host;
   const host = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
-  const forwarded = req.headers['x-forwarded-proto'];
-  const rawProto = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  const proto = rawProto?.split(',')[0]?.trim();
-  const scheme = proto === 'https' || proto === 'http' ? proto : 'http';
+  let scheme = (req.socket as { encrypted?: boolean } | undefined)?.encrypted ? 'https' : 'http';
+  if (process.env.AGORA_TRUST_PROXY === '1') {
+    const forwarded = req.headers['x-forwarded-proto'];
+    const rawProto = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const proto = rawProto?.split(',')[0]?.trim();
+    if (proto === 'https' || proto === 'http') scheme = proto;
+  }
   return `${scheme}://${host || 'localhost'}`;
+}
+
+/** 503 when this process is not on loopback and AGORA_PUBLIC_URL is unset. */
+export function rejectWithoutPublicUrl(req: IncomingMessage, res: ServerResponse): boolean {
+  if (process.env.AGORA_PUBLIC_URL?.trim()) return false;
+  if (processOnLoopback(req.socket?.localAddress)) return false;
+  if (!loggedOpenBind) {
+    loggedOpenBind = true;
+    console.error('[oauth] Refusing OAuth and MCP because AGORA_PUBLIC_URL is unset and this process is not bound to loopback.');
+  }
+  if (!res.headersSent && !res.writableEnded) {
+    res.writeHead(503, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(JSON.stringify({
+      error: 'server_error',
+      error_description: 'Set AGORA_PUBLIC_URL before using OAuth or MCP on a public address.',
+    }));
+  }
+  if (typeof req.resume === 'function') req.resume();
+  return true;
 }
 
 export function mcpResourceUrl(req: IncomingMessage): string {
@@ -135,6 +307,7 @@ function signPayload(payload: SignedPayload): string {
     exp: payload.exp,
     typ: payload.typ,
     jti: payload.jti,
+    gen: payload.gen,
   })).toString('base64url');
   const sig = createHmac('sha256', secret).update(body).digest('base64url');
   return `${body}.${sig}`;
@@ -148,7 +321,8 @@ function isPayload(value: unknown): value is SignedPayload {
     && typeof item.aud === 'string' && item.aud.length > 0 && item.aud.length <= 500
     && typeof item.exp === 'number' && Number.isInteger(item.exp)
     && (item.typ === 'access' || item.typ === 'refresh')
-    && typeof item.jti === 'string' && item.jti.length > 0 && item.jti.length <= 200;
+    && typeof item.jti === 'string' && item.jti.length > 0 && item.jti.length <= 200
+    && typeof item.gen === 'number' && Number.isInteger(item.gen) && item.gen >= 0;
 }
 
 function readPayload(token: string): SignedPayload | null {
@@ -167,6 +341,7 @@ function readPayload(token: string): SignedPayload | null {
     return null;
   }
   if (!isPayload(parsed) || parsed.exp <= nowSeconds()) return null;
+  if (parsed.gen !== currentGen(parsed.sub)) return null;
   return parsed;
 }
 
@@ -178,6 +353,7 @@ function issue(sub: string, scope: string, aud: string, typ: 'access' | 'refresh
     exp: nowSeconds() + seconds,
     typ,
     jti: randomBytes(16).toString('base64url'),
+    gen: currentGen(sub),
   };
   return { token: signPayload(payload), payload };
 }
@@ -210,12 +386,11 @@ function oauthError(res: ServerResponse, status: number, error: string, descript
 }
 
 function notConfigured(res: ServerResponse): void {
-  oauthError(
-    res,
-    503,
-    'server_error',
-    'OAuth is not configured. Set AGORA_OAUTH_CLIENT_ID, AGORA_OAUTH_CLIENT_SECRET, and AGORA_TOKEN_SECRET.',
-  );
+  const secret = process.env.AGORA_TOKEN_SECRET ?? '';
+  const description = secret.length > 0 && secret.length < MIN_SECRET
+    ? 'OAuth is not configured. AGORA_TOKEN_SECRET must be at least 32 characters.'
+    : 'OAuth is not configured. Set AGORA_OAUTH_CLIENT_ID, AGORA_OAUTH_CLIENT_SECRET, and AGORA_TOKEN_SECRET.';
+  oauthError(res, 503, 'server_error', description);
 }
 
 function decodeFormComponent(value: string): string | null {
@@ -244,11 +419,20 @@ function readBasic(header: string | string[] | undefined): { id: string; secret:
   return { id, secret };
 }
 
-function clientAuthenticated(header: string | string[] | undefined): boolean {
+function clientCredentials(header: string | string[] | undefined, form: URLSearchParams): { ok: true; id: string; secret: string } | { ok: false; error: string } {
   const basic = readBasic(header);
-  if (!basic) return false;
-  const secret = process.env.AGORA_OAUTH_CLIENT_SECRET ?? '';
-  return safeEqual(basic.id, clientId()) && safeEqual(basic.secret, secret);
+  const postedSecret = form.get('client_secret');
+  if (basic && postedSecret !== null) {
+    return { ok: false, error: 'Send the client secret in the Authorization header or the form body, not both.' };
+  }
+  if (basic) return { ok: true, id: basic.id, secret: basic.secret };
+  const postedId = form.get('client_id');
+  if (postedId !== null && postedSecret !== null) return { ok: true, id: postedId, secret: postedSecret };
+  return { ok: false, error: 'Client authentication failed. Use HTTP Basic or the form fields client_id and client_secret.' };
+}
+
+function clientMatches(id: string, secret: string): boolean {
+  return safeEqual(id, clientId()) && safeEqual(secret, process.env.AGORA_OAUTH_CLIENT_SECRET ?? '');
 }
 
 function headerValue(value: string | string[] | undefined): string {
@@ -301,8 +485,15 @@ function pathnameOf(req: IncomingMessage): string {
   }
 }
 
-function allowedRedirect(raw: string): boolean {
-  if (!raw || raw.length > 2000) return false;
+function registeredRedirects(): string[] {
+  return (process.env.AGORA_OAUTH_REDIRECT_URIS ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/** The voice simulator's own callback is http on localhost or 127.0.0.1. */
+function isSimulatorLoopback(raw: string): boolean {
   let url: URL;
   try {
     url = new URL(raw);
@@ -310,8 +501,15 @@ function allowedRedirect(raw: string): boolean {
     return false;
   }
   if (url.username || url.password || url.hash) return false;
-  if (url.protocol === 'https:') return true;
-  return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+  if (url.protocol !== 'http:') return false;
+  const host = url.hostname.toLowerCase();
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+function allowedRedirect(raw: string): boolean {
+  if (!raw || raw.length > 2000) return false;
+  if (registeredRedirects().some((item) => item === raw)) return true;
+  return isSimulatorLoopback(raw);
 }
 
 function escapeHtml(value: string): string {
@@ -326,16 +524,17 @@ interface AuthorizeInput {
   redirectUri: string;
   challenge: string;
   audience: string;
-  state?: string;
+  state: string;
 }
 
 function readAuthorizeInput(params: URLSearchParams, req: IncomingMessage): { ok: true; input: AuthorizeInput } | { ok: false; error: string } {
   const stateValue = params.get('state');
-  if (stateValue !== null && stateValue.length > 2000) return { ok: false, error: 'state is too long.' };
+  if (!stateValue) return { ok: false, error: 'state is required.' };
+  if (stateValue.length > 2000) return { ok: false, error: 'state is too long.' };
   if (params.get('response_type') !== 'code') return { ok: false, error: 'response_type must be code.' };
   if (!safeEqual(params.get('client_id') ?? '', clientId())) return { ok: false, error: 'This app is not registered for this household.' };
   const redirectUri = params.get('redirect_uri') ?? '';
-  if (!allowedRedirect(redirectUri)) return { ok: false, error: 'That redirect URL is not allowed. Use https, or http on localhost.' };
+  if (!allowedRedirect(redirectUri)) return { ok: false, error: 'That redirect URL is not registered for this household.' };
   const method = params.get('code_challenge_method') ?? '';
   if (method !== 'S256') return { ok: false, error: 'code_challenge_method must be S256.' };
   const challenge = params.get('code_challenge') ?? '';
@@ -343,9 +542,7 @@ function readAuthorizeInput(params: URLSearchParams, req: IncomingMessage): { ok
   const resource = params.get('resource');
   const audience = mcpResourceUrl(req);
   if (resource !== null && !resourcesMatch(resource, audience)) return { ok: false, error: 'The resource must be this household MCP server.' };
-  const input: AuthorizeInput = { redirectUri, challenge, audience };
-  if (stateValue !== null) input.state = stateValue;
-  return { ok: true, input };
+  return { ok: true, input: { redirectUri, challenge, audience, state: stateValue } };
 }
 
 const PAGE_STYLE = `
@@ -381,6 +578,8 @@ ${body}
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "frame-ancestors 'none'",
+    'X-Frame-Options': 'DENY',
   });
   res.end(html);
 }
@@ -426,7 +625,7 @@ function metadata(req: IncomingMessage): Record<string, unknown> {
     grant_types_supported: ['client_credentials', 'authorization_code', 'refresh_token'],
     response_types_supported: ['code'],
     code_challenge_methods_supported: ['S256'],
-    token_endpoint_auth_methods_supported: ['client_secret_basic'],
+    token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
     scopes_supported: SCOPES,
   };
 }
@@ -464,6 +663,14 @@ function pkceMatches(verifier: string, challenge: string): boolean {
   return safeEqual(digest, challenge);
 }
 
+function tooManyAttempts(res: ServerResponse): void {
+  res.writeHead(429, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end('Too many attempts. Try again in 15 minutes.');
+}
+
 async function handleToken(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if ((req.method ?? 'GET') !== 'POST') {
     drain(req);
@@ -481,17 +688,27 @@ async function handleToken(req: IncomingMessage, res: ServerResponse): Promise<v
     oauthError(res, 400, 'invalid_request', 'Send the token request as application/x-www-form-urlencoded.');
     return;
   }
-  if (!clientAuthenticated(req.headers.authorization)) {
-    drain(req);
-    oauthError(res, 401, 'invalid_client', 'Client authentication failed. Use HTTP Basic with the household client id and secret.');
-    return;
-  }
   let form: URLSearchParams;
   try {
     form = new URLSearchParams(await readText(req, 64 * 1024));
   } catch (error) {
     const status = (error as { statusCode?: number }).statusCode === 413 ? 413 : 400;
     oauthError(res, status, 'invalid_request', status === 413 ? 'The request body is too large.' : 'The request body could not be read.');
+    return;
+  }
+  const creds = clientCredentials(req.headers.authorization, form);
+  if (creds.ok === false) {
+    oauthError(res, 401, 'invalid_client', creds.error);
+    return;
+  }
+  if (!clientMatches(creds.id, creds.secret)) {
+    oauthError(res, 401, 'invalid_client', 'Client authentication failed.');
+    return;
+  }
+  try {
+    await ensureRefreshes();
+  } catch {
+    oauthError(res, 503, 'server_error', 'Refresh records could not be read.');
     return;
   }
   const grant = form.get('grant_type');
@@ -534,20 +751,32 @@ async function handleToken(req: IncomingMessage, res: ServerResponse): Promise<v
       aud: saved.audience,
       exp: refresh.payload.exp,
     });
+    persistRefreshes();
     tokenResponse(res, accessBody(access.token, USER_SCOPE, refresh.token));
     return;
   }
 
   if (grant === 'refresh_token') {
-    const presented = form.get('refresh_token') ?? '';
-    const payload = readPayload(presented);
+    const refreshToken = form.get('refresh_token') ?? '';
+    const payload = readPayload(refreshToken);
     if (!payload || payload.typ !== 'refresh') {
       oauthError(res, 400, 'invalid_grant', 'That refresh token is not valid.');
       return;
     }
     const saved = refreshes.get(payload.jti);
+    if (!saved) {
+      revokeSubject(payload.sub);
+      oauthError(res, 400, 'invalid_grant', 'That refresh token has already been used or has expired.');
+      return;
+    }
     refreshes.delete(payload.jti);
-    if (!saved || saved.exp <= nowSeconds() || saved.sub !== payload.sub || saved.aud !== payload.aud) {
+    if (saved.sub !== payload.sub || saved.aud !== payload.aud) {
+      revokeSubject(payload.sub);
+      oauthError(res, 400, 'invalid_grant', 'That refresh token has already been used or has expired.');
+      return;
+    }
+    if (saved.exp <= nowSeconds()) {
+      persistRefreshes();
       oauthError(res, 400, 'invalid_grant', 'That refresh token has already been used or has expired.');
       return;
     }
@@ -563,6 +792,7 @@ async function handleToken(req: IncomingMessage, res: ServerResponse): Promise<v
       aud: saved.aud,
       exp: refresh.payload.exp,
     });
+    persistRefreshes();
     tokenResponse(res, accessBody(access.token, saved.scope, refresh.token));
     return;
   }
@@ -624,10 +854,20 @@ async function handleAuthorize(req: IncomingMessage, res: ServerResponse): Promi
     consentPage(res, parsed.input);
     return;
   }
+  const passcodeKey = passcodeClientKey(req);
+  if (passcodeBlocked(passcodeKey)) {
+    tooManyAttempts(res);
+    return;
+  }
   if (!safeEqual(submitted, passcode)) {
+    if (recordPasscodeMiss(passcodeKey)) {
+      tooManyAttempts(res);
+      return;
+    }
     consentPage(res, parsed.input, 'That passcode is not right.');
     return;
   }
+  clearPasscodeMisses(passcodeKey);
   const code = randomBytes(32).toString('base64url');
   rememberLimited(codes, code, {
     redirectUri: parsed.input.redirectUri,
@@ -651,7 +891,7 @@ export function verifyBearer(header: string | string[] | undefined): BearerIdent
   const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
   if (!match) return null;
   const token = match[1];
-  const dev = process.env.AGORA_MCP_TOKEN;
+  const dev = acceptedDevToken();
   if (dev && safeEqual(token, dev)) {
     return {
       clientId: 'dev',
@@ -671,6 +911,7 @@ export function verifyBearer(header: string | string[] | undefined): BearerIdent
 }
 
 export async function handleOAuthRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (rejectWithoutPublicUrl(req, res)) return;
   const pathname = pathnameOf(req);
   const method = req.method ?? 'GET';
   const discovery = pathname === '/.well-known/oauth-authorization-server'

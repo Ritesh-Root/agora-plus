@@ -1,16 +1,19 @@
 import { createHash, randomBytes } from 'crypto';
 import type { IncomingMessage, ServerResponse } from 'http';
-import { oauthReady } from '../mcp/oauth';
+import { readJson, writeJson } from '../household/store';
+import { acceptedDevToken, oauthReady } from '../mcp/oauth';
 import { ttsSettings } from './tts';
 
 /**
  * The voice simulator asks our own OAuth server for tokens, the same way Alexa+ does.
  * A service token lists tools. An account-linked token calls them.
- * When OAuth is unset, AGORA_MCP_TOKEN is used for both.
+ * When OAuth is unset, a long AGORA_MCP_TOKEN is used for both.
+ * Once OAuth is configured, the dev token is not a fallback.
  */
 
 const LINK_MS = 10 * 60 * 1000;
 const MAX_PENDING = 50;
+const ACCOUNT_FILE = 'oauth-sim-account.json';
 
 export type SimMode = 'oauth' | 'dev-token' | 'unconfigured';
 
@@ -34,16 +37,56 @@ interface CachedToken {
 const pending = new Map<string, PendingLink>();
 const serviceTokens = new Map<string, CachedToken>();
 let account: Account | null = null;
+let accountLoaded = false;
+let accountWrite: Promise<void> = Promise.resolve();
+
+function accountShape(value: unknown): Account | null {
+  if (!value || typeof value !== 'object') return null;
+  const item = value as Record<string, unknown>;
+  if (typeof item.accessToken !== 'string' || !item.accessToken) return null;
+  if (typeof item.refreshToken !== 'string' || !item.refreshToken) return null;
+  if (typeof item.expiresAt !== 'number') return null;
+  return { accessToken: item.accessToken, refreshToken: item.refreshToken, expiresAt: item.expiresAt };
+}
+
+async function loadAccount(): Promise<void> {
+  if (accountLoaded) return;
+  accountLoaded = true;
+  try {
+    account = accountShape(await readJson<unknown>(ACCOUNT_FILE, null));
+  } catch (error) {
+    accountLoaded = false;
+    console.error('[alexa] Could not read the linked account.', error instanceof Error ? error.message : '');
+    throw error;
+  }
+}
+
+function saveAccount(): Promise<void> {
+  const snapshot = account;
+  accountWrite = accountWrite.then(() => writeJson(ACCOUNT_FILE, snapshot).catch((error) => {
+    console.error('[alexa] Could not save the linked account.', error instanceof Error ? error.message : '');
+  }));
+  return accountWrite;
+}
 
 export function resetAlexaAuth(): void {
   pending.clear();
   serviceTokens.clear();
   account = null;
+  accountLoaded = true;
+}
+
+/** Drops the in-memory link and reads it from AGORA_DATA_DIR again. */
+export async function reloadAlexaAccount(): Promise<void> {
+  await accountWrite;
+  account = null;
+  accountLoaded = false;
+  await loadAccount();
 }
 
 export function simMode(): SimMode {
   if (oauthReady()) return 'oauth';
-  if (process.env.AGORA_MCP_TOKEN?.trim()) return 'dev-token';
+  if (acceptedDevToken()) return 'dev-token';
   return 'unconfigured';
 }
 
@@ -132,6 +175,7 @@ async function freshUserToken(base: string): Promise<string | null> {
   }));
   const next = body ? readAccount(body) : null;
   account = next;
+  await saveAccount();
   return next?.accessToken ?? null;
 }
 
@@ -141,15 +185,15 @@ async function freshUserToken(base: string): Promise<string | null> {
  * Null means the person still has to press Link AGORA+.
  */
 export async function tokensForTurn(base: string): Promise<{ list: string; call: string } | null> {
+  await loadAccount();
   if (oauthReady()) {
     const user = await freshUserToken(base);
-    if (user) {
-      const list = await serviceToken(base);
-      if (list) return { list, call: user };
-      return { list: user, call: user };
-    }
+    if (!user) return null;
+    const list = await serviceToken(base);
+    if (list) return { list, call: user };
+    return { list: user, call: user };
   }
-  const dev = process.env.AGORA_MCP_TOKEN?.trim();
+  const dev = acceptedDevToken();
   if (dev) return { list: dev, call: dev };
   return null;
 }
@@ -171,7 +215,8 @@ export function simStatus(): { linked: boolean; mode: SimMode; model: string; tt
   return { linked, mode, model: alexaModelName(), tts: ttsSettings() };
 }
 
-export function handleAlexaStatus(res: ServerResponse): void {
+export async function handleAlexaStatus(res: ServerResponse): Promise<void> {
+  await loadAccount();
   sendJson(res, 200, simStatus());
 }
 
@@ -220,6 +265,7 @@ export async function completeAlexaLink(req: IncomingMessage, code: unknown, sta
   const next = body ? readAccount(body) : null;
   if (!next) return { ok: false, status: 400, error: 'AGORA+ could not be linked.' };
   account = next;
+  await saveAccount();
   return { ok: true };
 }
 

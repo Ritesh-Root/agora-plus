@@ -101,10 +101,10 @@ function structured(result: { structuredContent?: Record<string, unknown> }): Re
 
 beforeEach(async () => {
   for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
-  process.env.AGORA_MCP_TOKEN = 'dev-token';
+  process.env.AGORA_MCP_TOKEN = 'dev-token-0123456789abcdef012345';
   process.env.AGORA_OAUTH_CLIENT_ID = 'agora-client';
   process.env.AGORA_OAUTH_CLIENT_SECRET = 'agora-secret';
-  process.env.AGORA_TOKEN_SECRET = 'token-secret';
+  process.env.AGORA_TOKEN_SECRET = 'token-secret-0123456789abcdef012';
   process.env.AGORA_HOUSEHOLD_PASSCODE = 'home-pass';
   delete process.env.AGORA_PUBLIC_URL;
   delete process.env.AGORA_SERVER_LLM;
@@ -153,14 +153,14 @@ describe('MCP endpoint', () => {
   it('refuses a browser origin that is not this household', async () => {
     const response = await fetch(`${base}/mcp`, {
       method: 'POST',
-      headers: { ...jsonHeaders('dev-token'), origin: 'https://evil.example' },
+      headers: { ...jsonHeaders('dev-token-0123456789abcdef012345'), origin: 'https://evil.example' },
       body: '{}',
     });
     expect(response.status).toBe(403);
   });
 
   it('negotiates 2025-11-25 or newer and lists every tool with an output schema', async () => {
-    const connected = await connect('dev-token');
+    const connected = await connect('dev-token-0123456789abcdef012345');
     const version = connected.getNegotiatedProtocolVersion() ?? '';
     expect(version >= '2025-11-25').toBe(true);
     const listed = await connected.listTools();
@@ -173,7 +173,7 @@ describe('MCP endpoint', () => {
   });
 
   it('remembers, recalls, and forgets only after approval', async () => {
-    const connected = await connect('dev-token');
+    const connected = await connect('dev-token-0123456789abcdef012345');
     const saved = await connected.callTool({
       name: 'remember',
       arguments: { fact: 'Mia is allergic to peanuts', tags: ['allergy'] },
@@ -217,7 +217,7 @@ describe('MCP endpoint', () => {
   });
 
   it('holds a plan for approval and does not research the web yet', async () => {
-    const connected = await connect('dev-token');
+    const connected = await connect('dev-token-0123456789abcdef012345');
     const plan = await connected.callTool({ name: 'plan_and_run', arguments: { goal: 'Plan dinners this week' } });
     expect(plan.isError).toBeUndefined();
     expect(structured(plan).status).toBe('needs_approval');
@@ -268,7 +268,7 @@ describe('MCP endpoint', () => {
   });
 
   it('serves the household card and links it from the briefing', async () => {
-    const connected = await connect('dev-token');
+    const connected = await connect('dev-token-0123456789abcdef012345');
     const uri = 'ui://daily_briefing/household-card.html';
     const listed = await connected.listResources();
     const card = listed.resources.find((resource) => resource.uri === uri);

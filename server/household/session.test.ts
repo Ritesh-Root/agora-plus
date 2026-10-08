@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { verifySessionToken } from './session';
+import { recordPasscodeMiss, resetPasscodeLimiter, setPasscodeClock, verifySessionToken } from './session';
 import { setDataDir, writeText } from './store';
 import { handleApiRoutes } from '../routes';
 
@@ -20,8 +20,11 @@ function remember(name: string): void {
 beforeEach(async () => {
   remember('AGORA_HOUSEHOLD_PASSCODE');
   remember('AGORA_TOKEN_SECRET');
+  remember('AGORA_TRUST_PROXY');
   process.env.AGORA_HOUSEHOLD_PASSCODE = 'home-pass';
   process.env.AGORA_TOKEN_SECRET = 'session-secret';
+  delete process.env.AGORA_TRUST_PROXY;
+  resetPasscodeLimiter();
   dir = await mkdtemp(path.join(tmpdir(), 'agora-session-'));
   setDataDir(dir);
 });
@@ -39,12 +42,14 @@ function call(
   url: string,
   headers: Record<string, string>,
   json?: unknown,
+  remoteAddress = '127.0.0.1',
 ): Promise<{ status: number; body: string; headers: Record<string, string> }> {
   const req = new EventEmitter() as IncomingMessage;
   req.method = method;
   req.url = url;
   req.headers = headers;
   req.resume = () => req;
+  req.socket = { remoteAddress } as IncomingMessage['socket'];
   const res = new EventEmitter() as ServerResponse & { statusCode: number; body: string; headers: Record<string, string> };
   res.statusCode = 0;
   res.body = '';
@@ -125,10 +130,13 @@ describe('household session', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(200);
   });
 
-  it('leaves the routes open when no passcode is configured', async () => {
+  it('leaves the routes open on loopback when no passcode is configured', async () => {
     delete process.env.AGORA_HOUSEHOLD_PASSCODE;
     const household = await call('GET', '/api/household', { host: 'localhost:3000' });
     expect(household.status).toBe(200);
+    const remote = await call('GET', '/api/household', { host: 'localhost:3000' }, undefined, '192.168.1.20');
+    expect(remote.status).toBe(403);
+    expect(JSON.parse(remote.body).error).toContain('AGORA_HOUSEHOLD_PASSCODE');
     const session = await call('GET', '/api/session', { host: 'localhost:3000' });
     expect(JSON.parse(session.body)).toEqual({ required: false, active: false });
     await writeText(`runs/${RUN_ID}.md`, '# Dinner\n');
@@ -136,6 +144,32 @@ describe('household session', () => {
     expect(document.status).toBe(200);
     expect(document.body).toBe('# Dinner\n');
     expect(document.headers['Content-Type']).toContain('text/markdown');
+  });
+
+  it('blocks the shared passcode limiter after five misses', async () => {
+    for (let i = 0; i < 4; i += 1) recordPasscodeMiss('127.0.0.1');
+    const blocked = await call('POST', '/api/session', { host: 'localhost:3000', 'content-type': 'application/json' }, { passcode: 'nope' });
+    expect(blocked.status).toBe(429);
+    expect(blocked.body).toContain('Too many attempts');
+    setPasscodeClock(() => Date.now() + 15 * 60 * 1000 + 1000);
+    const again = await call('POST', '/api/session', { host: 'localhost:3000', 'content-type': 'application/json' }, { passcode: 'nope' });
+    expect(again.status).toBe(401);
+  });
+
+  it('marks the cookie Secure only when AGORA_TRUST_PROXY trusts the forwarded proto', async () => {
+    const plain = await call('POST', '/api/session', {
+      host: 'localhost:3000',
+      'content-type': 'application/json',
+      'x-forwarded-proto': 'https',
+    }, { passcode: 'home-pass' });
+    expect(plain.headers['Set-Cookie']).not.toContain('Secure');
+    process.env.AGORA_TRUST_PROXY = '1';
+    const trusted = await call('POST', '/api/session', {
+      host: 'localhost:3000',
+      'content-type': 'application/json',
+      'x-forwarded-proto': 'https',
+    }, { passcode: 'home-pass' });
+    expect(trusted.headers['Set-Cookie']).toContain('Secure');
   });
 
   it('locks the run document with the other household routes', async () => {

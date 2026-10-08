@@ -5,7 +5,10 @@
  */
 import { createReadStream, existsSync, statSync } from 'fs';
 import { createServer } from 'http';
-import { extname, join, resolve, sep } from 'path';
+import path, { extname, join, resolve, sep } from 'path';
+import { pathToFileURL } from 'url';
+import { householdLockEnabled } from './household/session';
+import { noteBindHost } from './hub';
 import { handleModelTest } from './modelTest';
 import { handleMcpRoutes } from './mcp/http';
 import { handleApiRoutes } from './routes';
@@ -50,7 +53,34 @@ const server = createServer((req, res) => {
   createReadStream(target).pipe(res);
 });
 
-attachRelay(server);
-server.listen(port, '0.0.0.0', () => {
-  console.log(`[agora] listening on 0.0.0.0:${port}`);
-});
+/** `0.0.0.0` only when a household passcode is set. Otherwise stay on loopback. */
+export function productionBindHost(): '127.0.0.1' | '0.0.0.0' {
+  return householdLockEnabled() ? '0.0.0.0' : '127.0.0.1';
+}
+
+function isProductionEntry(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(path.resolve(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isProductionEntry()) {
+  const host = productionBindHost();
+  noteBindHost(host);
+  attachRelay(server);
+  server.listen(port, host, () => {
+    if (host === '127.0.0.1') {
+      console.log(`[agora] listening on 127.0.0.1:${port} because AGORA_HOUSEHOLD_PASSCODE is not set. The household stays on this machine.`);
+      return;
+    }
+    if (!process.env.DEMO_HOST_SECRET?.trim()) {
+      console.log(`[agora] listening on 0.0.0.0:${port}. DEMO_HOST_SECRET is unset, so the household session is the room host.`);
+      return;
+    }
+    console.log(`[agora] listening on 0.0.0.0:${port}`);
+  });
+}
