@@ -23,7 +23,9 @@
 | Too chatty | Voice reply limited to 2 sentences; detail goes on screen |
 | Cloud-only, privacy, ads ([Implicator](https://www.implicator.ai/alexa-at-seven-months-has-amazons-smarter-assistant-proved-itself.md)) | Self-hosted, data on your own disk, approval before side effects, no ads |
 | Third-party integrations lag | Standard MCP, so one brain works from Alexa+, Claude and ChatGPT |
-| What users want: memory, proactivity (62%), control | Editable memory, `daily_briefing` and suggestions, approvals |
+| What users want: memory, a checkpoint before acting (Stack Overflow 2026: 63% rarely or never let an agent run on autopilot), control | Editable memory, `daily_briefing` and suggestions, approvals |
+
+> Phase 0b correction: the "62% want proactive assistants" figure could not be verified — do not cite it. Device control (lights, Hue, routines) is the loudest complaint and is not in scope; the demo must not pretend to fix it. See `docs/research/feature-matrix.md`.
 
 ## Verified technical decisions
 - **MCP:** the v2 SDK `@modelcontextprotocol/server` plus `@modelcontextprotocol/node`.
