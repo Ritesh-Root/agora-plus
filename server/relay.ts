@@ -7,18 +7,16 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
 import { parseRoomMentions, readAgentAccess, sanitizeChatAgents, sanitizeTeamAgents } from '../shared/mentions';
 import { publicModelError } from './modelError';
-import { normalizeChatText, RoomState } from './roomState';
+import { normalizeChatText } from './roomState';
 import { runRoomDiscussion } from './roomReply';
-import { runSociety } from './society/Orchestrator';
-import { leadNotesFromConflict } from './society/leadNotes';
 import { runBenchmark } from './bench/runner';
 import { createRoutingProvider } from './routingProvider';
 import { isFailed, resolveRoutedAccess } from './modelAccess';
 import { handleModelTest } from './modelTest';
 import { assertChatProxyTarget, MAX_PROXY_BODY } from './proxyGuard';
-import { beginRunStats, currentRunStats, endRunStats } from './society/decider/runStats';
-import { setBossAsker, setDecisionSink, toDecisionWire } from './society/decider/live';
-import { researchSearchCount, researchSources } from './research/research';
+import { getHub } from './hub';
+import { forwardSocietyEvent, startSocietyRun } from './runEngine';
+import { handleApiRoutes } from './routes';
 
 /**
  * Room chat needs only the speakers' endpoints, so one bad connection fails only that speaker.
@@ -137,73 +135,6 @@ function send(ws: WsSocket, msg: ServerMessage): void {
   }
 }
 
-function forwardSocietyEvent(
-  ws: WsSocket,
-  event: { type: string; [key: string]: any },
-  tracked?: { runId: string; room: RoomState; deliver: (msg: ServerMessage) => void },
-): void {
-  if (tracked && !tracked.room.ownsRun(tracked.runId)) return;
-  const deliver = tracked?.deliver ?? ((msg: ServerMessage) => send(ws, msg));
-  const runId = tracked?.runId;
-  const room = tracked?.room;
-  if (event.type === 'task-research') {
-    if (runId && room) room.noteTask(runId, { id: event.taskId, title: event.title, role: event.role, status: 'running' });
-    deliver({
-      type: 'society-task-update',
-      taskId: event.taskId,
-      title: event.title,
-      role: event.role,
-      status: 'running',
-      researching: true,
-    });
-  } else if (event.type === 'task-start') {
-    if (runId && room) room.noteTask(runId, { id: event.taskId, title: event.title, role: event.role, status: 'running' });
-    deliver({
-      type: 'society-task-update',
-      taskId: event.taskId,
-      title: event.title,
-      role: event.role,
-      status: 'running',
-    });
-  } else if (event.type === 'task-healing') {
-    if (runId && room) room.noteTask(runId, { id: event.taskId, title: event.title, role: event.role, status: 'healing', attempt: event.attempt });
-    deliver({
-      type: 'society-task-update',
-      taskId: event.taskId,
-      title: event.title,
-      role: event.role,
-      status: 'healing',
-      attempt: event.attempt,
-    });
-  } else if (event.type === 'task-done') {
-    if (runId && room) {
-      room.noteTask(runId, {
-        id: event.taskId,
-        title: event.title,
-        role: event.role,
-        status: event.status === 'done' ? 'done' : 'escalated',
-        output: event.output,
-        attempt: event.attempts,
-      });
-    }
-    deliver({
-      type: 'society-task-update',
-      taskId: event.taskId,
-      title: event.title,
-      role: event.role,
-      status: event.status === 'done' ? 'done' : 'escalated',
-      output: event.output,
-      attempt: event.attempts,
-    });
-  } else if (event.type === 'society-synthesizing') {
-    if (runId && room) room.noteStage(runId, 'assembling');
-    deliver({ type: 'society-stage', stage: 'assembling' });
-  } else if (event.type === 'society-repairing') {
-    if (runId && room) room.noteStage(runId, 'repairing');
-    deliver({ type: 'society-stage', stage: 'repairing' });
-  }
-}
-
 /**
  * Vite plugin attaching a plain WebSocket relay to the dev-server process.
  *
@@ -218,7 +149,7 @@ export function relayPlugin(): Plugin {
     name: 'agora-relay',
     configureServer(server: ViteDevServer) {
       server.middlewares.use((req, res, next) => {
-        if (handleCorsProxy(req, res) || handleModelTest(req, res)) return;
+        if (handleCorsProxy(req, res) || handleModelTest(req, res) || handleApiRoutes(req, res)) return;
         next();
       });
       if (!server.httpServer) {
@@ -233,13 +164,8 @@ export function relayPlugin(): Plugin {
 /** Room relay for the Vite dev server and the production process. */
 export function attachRelay(httpServer: Server): void {
   let wss: WebSocketServer | null = null;
-  const room = new RoomState({ hostSecret: process.env.DEMO_HOST_SECRET });
-      const sockets = new Map<string, WsSocket>();
+  const { room, sockets, broadcastAll, pendingBoss } = getHub();
       let replyChain = Promise.resolve();
-
-      const broadcastAll = (msg: ServerMessage): void => {
-        for (const ws of sockets.values()) send(ws, msg);
-      };
 
       const broadcastExcept = (excludeId: string, msg: ServerMessage): void => {
         for (const [id, ws] of sockets) {
@@ -263,13 +189,6 @@ export function attachRelay(httpServer: Server): void {
 
       wss.on('connection', (ws: WsSocket) => {
         let playerId: string | null = null;
-        const pendingBoss = new Map<string, (reply: { action: 'approve' | 'edit' | 'reject'; text?: string } | null) => void>();
-        const clearBoss = () => {
-          setDecisionSink(null);
-          setBossAsker(null);
-          for (const wait of pendingBoss.values()) wait(null);
-          pendingBoss.clear();
-        };
 
         ws.on('message', async (raw) => {
           let msg: ClientMessage;
@@ -458,22 +377,20 @@ export function attachRelay(httpServer: Server): void {
                 send(ws, { type: 'society-error', error: 'Only the room host can run the swarm.' });
                 break;
               }
-              const begun = room.beginRun(msg.brief);
-              if (!begun.ok) {
+              const active = room.currentRun();
+              if (active && (active.status === 'running' || active.status === 'cancel_requested')) {
                 send(ws, { type: 'society-error', error: 'A run is already in progress.' });
                 break;
               }
-              const runId = begun.run.id;
-              const deliver = (message: ServerMessage) => {
-                if (!room.ownsRun(runId)) return;
-                const host = room.getRoster().find((player) => player.isHost);
-                const sock = host ? sockets.get(host.id) : undefined;
-                if (sock) send(sock, message);
-              };
               // Demo/dev replay: when SOCIETY_REPLAY points at a recorded run's
               // message schedule, stream those events instead of running live.
               const societyReplay = process.env.SOCIETY_REPLAY;
               if (societyReplay) {
+                const begun = room.beginRun(msg.brief);
+                if (!begun.ok) {
+                  send(ws, { type: 'society-error', error: 'A run is already in progress.' });
+                  break;
+                }
                 try {
                   const sched = JSON.parse(readFileSync(societyReplay, 'utf8'));
                   console.log('[relay] society replay from', societyReplay);
@@ -483,158 +400,33 @@ export function attachRelay(httpServer: Server): void {
                   break;
                 } catch (e) {
                   console.error('[relay] society replay failed, running live:', e);
+                  room.markStopped(begun.run.id);
                 }
               }
               let provider;
               try {
                 provider = await providerFromClient(msg, { requireAll: true });
               } catch (error) {
-                room.markStopped(runId);
-                send(ws, { type: 'society-run-status', runId, status: 'stopped' });
+                const failed = room.beginRun(msg.brief);
+                if (failed.ok) {
+                  room.markStopped(failed.run.id);
+                  send(ws, { type: 'society-run-status', runId: failed.run.id, status: 'stopped' });
+                }
                 send(ws, { type: 'society-error', error: publicModelError(error) });
                 break;
               }
-
-              send(ws, { type: 'society-started', brief: msg.brief, taskCount: 0 });
-              beginRunStats();
-              setDecisionSink((record) => {
-                send(ws, { type: 'society-decision', decision: toDecisionWire(record) });
+              const started = await startSocietyRun({
+                brief: msg.brief,
+                provider,
+                model: msg.model?.trim(),
+                team: sanitizeTeamAgents(msg.agents),
+                source: 'room',
+                requester: ws,
               });
-              setBossAsker((record) => new Promise((resolve) => {
-                const id = randomUUID();
-                const timer = setTimeout(() => {
-                  pendingBoss.delete(id);
-                  resolve(null);
-                }, 30_000);
-                pendingBoss.set(id, (reply) => {
-                  clearTimeout(timer);
-                  resolve(reply);
-                });
-                send(ws, { type: 'decision-request', id, decision: toDecisionWire(record) });
-              }));
-
-              const model = msg.model?.trim();
-              const team = sanitizeTeamAgents(msg.agents);
-              provider.prepareRequest({ runId, stage: 'planning', agent: team[0]?.name ?? 'Manager', attempt: 1 });
-              let negotiationRes: any;
-              runSociety(msg.brief, provider, {
-                models: model ? { manager: model, worker: model } : undefined,
-                team,
-                shouldStop: () => room.cancelRequested(runId),
-                onEvent: (event) => forwardSocietyEvent(ws, event, { runId, room, deliver }),
-                beforeSynthesis: async (tasks) => {
-                  if (room.cancelRequested(runId)) return '';
-                  try {
-                    const prepared = await leadNotesFromConflict(msg.brief, tasks, provider, (event) => {
-                      if (event.type === 'society-debating') {
-                        if (room.ownsRun(runId)) room.noteStage(runId, 'debating');
-                        deliver({ type: 'society-stage', stage: 'debating' });
-                      } else if (event.type === 'negotiation-turn') {
-                        deliver({
-                          type: 'society-negotiation',
-                          topic: event.topic ?? 'Worker outputs',
-                          round: event.round,
-                          agent: event.agent,
-                          argument: event.argument
-                        });
-                      } else if (event.type === 'negotiation-scores') {
-                        deliver({
-                          type: 'society-negotiation',
-                          topic: event.topic ?? 'Worker outputs',
-                          round: event.round,
-                          agent: 'Referee',
-                          argument: `Scoring results for Round ${event.round}`,
-                          scores: event.scores
-                        });
-                      }
-                    }, model || 'deepseek-v4.1-flash');
-                    if (prepared.negotiation) {
-                      negotiationRes = {
-                        topic: prepared.negotiation.topic,
-                        rounds: prepared.negotiation.rounds,
-                        outcome: prepared.negotiation.outcome,
-                        winner: prepared.negotiation.winner,
-                        synthesis: prepared.negotiation.synthesis,
-                        scores: prepared.negotiation.scores,
-                        transcript: prepared.negotiation.transcript
-                      };
-                    }
-                    return prepared.notes;
-                  } catch (e) {
-                    console.error('[Relay] Negotiation failed:', e);
-                  }
-                }
-              }).then(async (result) => {
-                if (!room.ownsRun(runId)) return;
-                if (result.documentStatus === 'stopped') {
-                  room.markStopped(runId);
-                  deliver({ type: 'society-run-status', runId, status: 'stopped' });
-                  endRunStats();
-                  clearBoss();
-                  return;
-                }
-                const recorded = room.finishRun(runId, {
-                  status: result.revisionLabel ? 'needs_revision' : 'complete',
-                  synthesis: result.synthesis,
-                  wordCount: result.wordCount,
-                  revisionLabel: result.revisionLabel,
-                });
-                if (!recorded) {
-                  endRunStats();
-                  clearBoss();
-                  return;
-                }
-                const counted = provider.takeUsage();
-                deliver({
-                  type: 'society-complete',
-                  result: {
-                    brief: result.brief,
-                    tasks: result.tasks.map(t => ({
-                      id: t.id,
-                      title: t.title,
-                      role: t.role,
-                      status: t.status,
-                      output: t.output,
-                      attempts: t.attempts,
-                      healed: t.healed
-                    })),
-                    synthesis: result.synthesis,
-                    wordCount: result.wordCount,
-                    revisionLabel: result.revisionLabel,
-                    negotiation: negotiationRes,
-                    metrics: {
-                      ...result.metrics,
-                      totalCalls: counted.calls,
-                      totalPromptTokens: counted.promptTokens,
-                      totalCompletionTokens: counted.completionTokens,
-                      missingUsage: counted.missingUsage,
-                    },
-                    research: {
-                      searches: currentRunStats()?.researchCalls ?? researchSearchCount(),
-                      sources: researchSources(),
-                    },
-                    summary: {
-                      decisions: currentRunStats()?.decisionCalls ?? 0,
-                      inputTokens: currentRunStats()?.inputTokens ?? 0,
-                      jevCostUsd: ((currentRunStats()?.inputTokens ?? 0) * 0.042) / 1_000_000,
-                      searches: researchSearchCount(),
-                      sources: researchSources(),
-                      comparisonMeasured: false,
-                      comparisonNote: 'The five-brief comparison was not run. Jev returned HTTP 401, so time saved versus the legacy path was not measured.',
-                    },
-                  }
-                });
-                endRunStats();
-                clearBoss();
-              }).catch((err) => {
-                endRunStats();
-                clearBoss();
-                if (room.ownsRun(runId)) {
-                  room.markStopped(runId);
-                  deliver({ type: 'society-run-status', runId, status: 'stopped' });
-                  deliver({ type: 'society-error', error: publicModelError(err) });
-                }
-              });
+              if (!started.ok) {
+                const { error } = started as { ok: false; error: string };
+                send(ws, { type: 'society-error', error });
+              }
               break;
             }
             case 'run-benchmark': {

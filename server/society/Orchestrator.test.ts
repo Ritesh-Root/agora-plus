@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runSociety, parsePlan, type LLMLike } from './Orchestrator';
+import { runSociety, planSociety, parsePlan, type LLMLike, type SocietyTask } from './Orchestrator';
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -155,6 +155,38 @@ describe('Society Orchestrator', () => {
     expect(result.wordCount).toBeLessThanOrEqual(399);
     expect(result.metrics.repairCalls).toBe(1);
   });
+
+describe('planSociety', () => {
+  it('returns parsed tasks from a fake model', async () => {
+    const provider: LLMLike = {
+      async generateCompletion() {
+        return { content: JSON.stringify([{ id: 'a', title: 'Frame', role: 'worker', prompt: 'frame it' }]) };
+      },
+    };
+    const planned = await planSociety('Agree the shot', provider);
+    expect(planned.tasks).toHaveLength(1);
+    expect(planned.tasks[0].id).toBe('a');
+    expect(planned.usage.calls).toBe(1);
+  });
+
+  it('does not call the planner when preset tasks are provided', async () => {
+    let planning = 0;
+    const provider: LLMLike = {
+      async generateCompletion(_messages, _tools, systemInstruction) {
+        if (systemInstruction?.includes('You are the Manager') || systemInstruction?.includes('You lead this team')) {
+          planning += 1;
+        }
+        return { content: 'A finished piece of the brief.' };
+      },
+    };
+    const preset: SocietyTask[] = [{ id: 't1', title: 'Note', role: 'worker', prompt: 'Write the note' }];
+    const result = await runSociety('Plan dinner', provider, { presetTasks: preset });
+    expect(planning).toBe(0);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].id).toBe('t1');
+    expect(result.synthesis).toBe('A finished piece of the brief.');
+  });
+});
 
 describe('parsePlan', () => {
   it('parses a fenced JSON code block', () => {

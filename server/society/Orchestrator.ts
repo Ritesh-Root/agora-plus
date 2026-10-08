@@ -99,6 +99,8 @@ export interface OrchestratorOptions {
   beforeSynthesis?: (results: TaskResult[]) => Promise<string | void>;
   /** Selected team. When present, the run uses these names and models instead of Manager/Worker/Lead. */
   team?: { name: string; description: string; model?: string }[];
+  /** Skip the manager decomposition and run these tasks. */
+  presetTasks?: SocietyTask[];
   /** True after cancel. In-flight provider calls may still finish; later stages must not start. */
   shouldStop?: () => boolean;
 }
@@ -333,23 +335,21 @@ async function runWorker(
   }
 }
 
-/** Run a full society pass over a brief. */
-export async function runSociety(
+export interface PlanUsage {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+/** Step 1: the lead, or the Manager when no team was sent, decomposes the brief. */
+export async function planSociety(
   brief: string,
   provider: LLMLike,
   options: OrchestratorOptions = {},
-): Promise<SocietyResult> {
-  const start = Date.now();
-  const managerStarted = Date.now();
+): Promise<{ tasks: SocietyTask[]; usage: PlanUsage }> {
   const managerModel = options.models?.manager ?? DEFAULT_MANAGER_MODEL;
-  const workerModel = options.models?.worker ?? DEFAULT_WORKER_MODEL;
   const team = (options.team ?? []).filter((agent) => agent.name.trim()).slice(0, 8);
-  const usage = { calls: 0, promptTokens: 0, completionTokens: 0 };
-  const isValid = options.isValidOutput ?? defaultIsValid;
-  const onEvent = options.onEvent;
-  beginResearch();
-
-  // 1. The selected team lead, or the Manager when no team was sent, decomposes the brief.
+  const usage: PlanUsage = { calls: 0, promptTokens: 0, completionTokens: 0 };
   const managerSystem = team.length
     ? [
         'You lead this team:',
@@ -369,7 +369,35 @@ export async function runSociety(
     modelFor(team, team[0]?.name ?? '', managerModel),
   );
   noteCall(usage, plan);
-  const tasks = parsePlan(plan.content);
+  return { tasks: parsePlan(plan.content), usage };
+}
+
+/** Run a full society pass over a brief. */
+export async function runSociety(
+  brief: string,
+  provider: LLMLike,
+  options: OrchestratorOptions = {},
+): Promise<SocietyResult> {
+  const start = Date.now();
+  const managerStarted = Date.now();
+  const managerModel = options.models?.manager ?? DEFAULT_MANAGER_MODEL;
+  const workerModel = options.models?.worker ?? DEFAULT_WORKER_MODEL;
+  const team = (options.team ?? []).filter((agent) => agent.name.trim()).slice(0, 8);
+  const usage = { calls: 0, promptTokens: 0, completionTokens: 0 };
+  const isValid = options.isValidOutput ?? defaultIsValid;
+  const onEvent = options.onEvent;
+  beginResearch();
+
+  let tasks: SocietyTask[];
+  if (options.presetTasks) {
+    tasks = options.presetTasks.map((task, index) => normalizeTask(task, index));
+  } else {
+    const planned = await planSociety(brief, provider, options);
+    tasks = planned.tasks;
+    usage.calls += planned.usage.calls;
+    usage.promptTokens += planned.usage.promptTokens;
+    usage.completionTokens += planned.usage.completionTokens;
+  }
   const managerMs = Date.now() - managerStarted;
 
   const tracker = makeConcurrencyTracker();
