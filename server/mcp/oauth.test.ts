@@ -3,10 +3,15 @@ import { createServer, type Server } from 'http';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetPasscodeLimiter } from '../household/session';
 import { setDataDir } from '../household/store';
+import { noteBindHost } from '../hub';
 import { handleMcpRoutes } from './http';
-import { resetOauthState, setOauthClock } from './oauth';
+import { flushOauthWrites, reloadOauthFromDisk, resetOauthState, setOauthClock } from './oauth';
+
+const DEV_TOKEN = 'dev-token-0123456789abcdef012345';
+const TOKEN_SECRET = 'token-secret-0123456789abcdef012';
 
 const ENV_KEYS = [
   'AGORA_MCP_TOKEN',
@@ -15,6 +20,10 @@ const ENV_KEYS = [
   'AGORA_TOKEN_SECRET',
   'AGORA_HOUSEHOLD_PASSCODE',
   'AGORA_PUBLIC_URL',
+  'AGORA_ALLOW_DEV_TOKEN',
+  'AGORA_OAUTH_REDIRECT_URIS',
+  'AGORA_TRUST_PROXY',
+  'NODE_ENV',
 ] as const;
 
 const savedEnv = new Map<string, string | undefined>();
@@ -50,12 +59,17 @@ async function tokenRequest(headers: Record<string, string>, body: URLSearchPara
 
 beforeEach(async () => {
   for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
-  process.env.AGORA_MCP_TOKEN = 'dev-token';
+  process.env.AGORA_MCP_TOKEN = DEV_TOKEN;
   process.env.AGORA_OAUTH_CLIENT_ID = 'agora-client';
   process.env.AGORA_OAUTH_CLIENT_SECRET = 'agora-secret';
-  process.env.AGORA_TOKEN_SECRET = 'token-secret';
+  process.env.AGORA_TOKEN_SECRET = TOKEN_SECRET;
   process.env.AGORA_HOUSEHOLD_PASSCODE = 'home-pass';
   delete process.env.AGORA_PUBLIC_URL;
+  delete process.env.AGORA_ALLOW_DEV_TOKEN;
+  delete process.env.AGORA_OAUTH_REDIRECT_URIS;
+  delete process.env.AGORA_TRUST_PROXY;
+  noteBindHost('');
+  resetPasscodeLimiter();
   resetOauthState();
   dir = await mkdtemp(path.join(tmpdir(), 'agora-oauth-'));
   setDataDir(dir);
@@ -87,7 +101,7 @@ describe('OAuth', () => {
     expect(metadata.grant_types_supported).toEqual(['client_credentials', 'authorization_code', 'refresh_token']);
     expect(metadata.response_types_supported).toEqual(['code']);
     expect(metadata.code_challenge_methods_supported).toEqual(['S256']);
-    expect(metadata.token_endpoint_auth_methods_supported).toEqual(['client_secret_basic']);
+    expect(metadata.token_endpoint_auth_methods_supported).toEqual(['client_secret_basic', 'client_secret_post']);
     expect(metadata.scopes_supported).toEqual(['mcp:service', 'mcp:tools', 'mcp:resources']);
 
     const resource = await fetch(`${base}/.well-known/oauth-protected-resource/mcp`);
@@ -98,12 +112,8 @@ describe('OAuth', () => {
     expect(doc.scopes_supported).toContain('mcp:tools');
   });
 
-  it('requires HTTP Basic and rejects a wrong secret', async () => {
-    const missing = await tokenRequest({}, new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: 'agora-client',
-      client_secret: 'agora-secret',
-    }));
+  it('accepts the client secret in HTTP Basic or the form body, and rejects both', async () => {
+    const missing = await tokenRequest({}, new URLSearchParams({ grant_type: 'client_credentials' }));
     expect(missing.status).toBe(401);
     expect((await missing.json() as { error: string }).error).toBe('invalid_client');
 
@@ -113,6 +123,24 @@ describe('OAuth', () => {
     );
     expect(wrong.status).toBe(401);
     expect((await wrong.json() as { error: string }).error).toBe('invalid_client');
+
+    const posted = await tokenRequest({}, new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: 'agora-client',
+      client_secret: 'agora-secret',
+    }));
+    expect(posted.status).toBe(200);
+
+    const both = await tokenRequest(
+      { authorization: basic() },
+      new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: 'agora-client',
+        client_secret: 'agora-secret',
+      }),
+    );
+    expect(both.status).toBe(401);
+    expect((await both.json() as { error: string }).error).toBe('invalid_client');
   });
 
   it('issues a service token and rejects a mismatched resource', async () => {
@@ -159,6 +187,8 @@ describe('OAuth', () => {
 
     const page = await fetch(`${base}/oauth/authorize?${query}`);
     expect(page.status).toBe(200);
+    expect(page.headers.get('content-security-policy')).toBe("frame-ancestors 'none'");
+    expect(page.headers.get('x-frame-options')).toBe('DENY');
     expect(await page.text()).toContain('Household passcode');
 
     const denied = await fetch(`${base}/oauth/authorize`, {
@@ -241,6 +271,22 @@ describe('OAuth', () => {
     );
     expect(replay.status).toBe(400);
     expect((await replay.json() as { error: string }).error).toBe('invalid_grant');
+
+    const replacement = await tokenRequest(
+      { authorization: basic() },
+      new URLSearchParams({ grant_type: 'refresh_token', refresh_token: next.refresh_token }),
+    );
+    expect(replacement.status).toBe(400);
+    const dead = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${next.access_token}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+    });
+    expect(dead.status).toBe(401);
   });
 
   it('rejects an expired token and a tampered token', async () => {
@@ -305,7 +351,7 @@ describe('OAuth', () => {
     const allowed = await fetch(`${base}/mcp`, {
       method: 'POST',
       headers: {
-        authorization: 'Bearer dev-token',
+        authorization: `Bearer ${DEV_TOKEN}`,
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream',
       },
@@ -313,5 +359,147 @@ describe('OAuth', () => {
     });
     expect(allowed.status).not.toBe(401);
     expect(allowed.status).not.toBe(503);
+  });
+
+  it('refuses OAuth when the token secret is shorter than 32 characters', async () => {
+    process.env.AGORA_TOKEN_SECRET = 'short-secret';
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((message?: unknown) => {
+      errors.push(String(message));
+    });
+    const metadata = await fetch(`${base}/.well-known/oauth-authorization-server`);
+    spy.mockRestore();
+    expect(metadata.status).toBe(503);
+    const body = await metadata.json() as { error_description: string };
+    expect(body.error_description).toContain('32');
+    expect(errors.join('\n')).toContain('shorter than 32');
+    expect(errors.join('\n')).not.toContain('short-secret');
+  });
+
+  it('ignores a dev token in production and on an https public URL unless allowed', async () => {
+    process.env.NODE_ENV = 'production';
+    const production = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${DEV_TOKEN}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+    });
+    expect(production.status).toBe(401);
+    process.env.AGORA_ALLOW_DEV_TOKEN = '1';
+    const allowed = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${DEV_TOKEN}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+    });
+    expect(allowed.status).not.toBe(401);
+  });
+
+  it('requires state and an exact registered redirect', async () => {
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const missingState = await fetch(`${base}/oauth/authorize?${new URLSearchParams({
+      response_type: 'code',
+      client_id: 'agora-client',
+      redirect_uri: 'http://127.0.0.1/callback',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+    })}`);
+    expect(missingState.status).toBe(400);
+    expect(await missingState.text()).toContain('state is required');
+
+    const https = await fetch(`${base}/oauth/authorize?${new URLSearchParams({
+      response_type: 'code',
+      client_id: 'agora-client',
+      redirect_uri: 'https://alexa.amazon.com/api/skill/link/cb',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state: 'region',
+    })}`);
+    expect(https.status).toBe(400);
+
+    process.env.AGORA_OAUTH_REDIRECT_URIS = 'https://alexa.amazon.com/api/skill/link/cb, https://layla.amazon.com/api/skill/link/cb';
+    const registered = await fetch(`${base}/oauth/authorize?${new URLSearchParams({
+      response_type: 'code',
+      client_id: 'agora-client',
+      redirect_uri: 'https://alexa.amazon.com/api/skill/link/cb',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state: 'region',
+    })}`);
+    expect(registered.status).toBe(200);
+  });
+
+  it('keeps a refresh token after the in-memory records are dropped', async () => {
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const redirectUri = 'http://127.0.0.1/callback';
+    const allowed = await fetch(`${base}/oauth/authorize`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        response_type: 'code',
+        client_id: 'agora-client',
+        redirect_uri: redirectUri,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        state: 'keep',
+        passcode: 'home-pass',
+      }),
+      redirect: 'manual',
+    });
+    const code = new URL(allowed.headers.get('location') ?? '').searchParams.get('code') ?? '';
+    const exchanged = await tokenRequest({}, new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: 'agora-client',
+      client_secret: 'agora-secret',
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
+    }));
+    expect(exchanged.status).toBe(200);
+    const tokens = await exchanged.json() as { refresh_token: string };
+    await flushOauthWrites();
+    await reloadOauthFromDisk();
+    const refreshed = await tokenRequest(
+      { authorization: basic() },
+      new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token }),
+    );
+    expect(refreshed.status).toBe(200);
+  });
+
+  it('locks the authorize passcode after five misses', async () => {
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const body = new URLSearchParams({
+      response_type: 'code',
+      client_id: 'agora-client',
+      redirect_uri: 'http://127.0.0.1/callback',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state: 'lock',
+      passcode: 'wrong',
+    });
+    for (let i = 0; i < 4; i += 1) {
+      const attempt = await fetch(`${base}/oauth/authorize`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+      expect(attempt.status).toBe(401);
+    }
+    const blocked = await fetch(`${base}/oauth/authorize`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    expect(blocked.status).toBe(429);
+    expect(await blocked.text()).toContain('Too many attempts');
   });
 });

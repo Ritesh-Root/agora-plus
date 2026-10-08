@@ -17,6 +17,7 @@ function call(json: unknown): Promise<{ status: number; body: string; type: stri
   req.url = '/api/tts';
   req.headers = { host: 'localhost:3000', 'content-type': 'application/json' };
   req.resume = () => req;
+  req.socket = { remoteAddress: '127.0.0.1' } as IncomingMessage['socket'];
   const res = new EventEmitter() as ServerResponse & { statusCode: number; body: string; type: string };
   res.statusCode = 0;
   res.body = '';

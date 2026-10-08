@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'http';
+import { householdLockEnabled, householdSessionActive } from './household/session';
 import { resolveModelAccess } from './modelAccess';
 import { publicModelError } from './modelError';
-import { MAX_PROXY_BODY } from './proxyGuard';
+import { assertPublicHttpsTarget, fetchPinned, MAX_PROXY_BODY } from './proxyGuard';
 import { isNvidiaTarget, requestModel, requestOptions } from './society/provider';
 
 function chatUrl(baseUrl: string): string {
@@ -18,6 +19,11 @@ function sendJson(res: ServerResponse, status: number, body: { ok?: true; error?
 export function handleModelTest(req: IncomingMessage, res: ServerResponse): boolean {
   const pathname = (req.url ?? '').split('?')[0];
   if (pathname !== '/api/model-test') return false;
+  if (householdLockEnabled() && !householdSessionActive(req)) {
+    if (typeof req.resume === 'function') req.resume();
+    sendJson(res, 401, { error: 'household_locked' });
+    return true;
+  }
   if (req.method !== 'POST') {
     sendJson(res, 405, { error: 'Method not allowed' });
     return true;
@@ -59,15 +65,14 @@ export function handleModelTest(req: IncomingMessage, res: ServerResponse): bool
           ...requestOptions(sentModel, isNvidia),
         };
         const fallbackBase = isNvidia ? 'https://integrate.api.nvidia.com/v1' : 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1';
-        const response = await fetch(chatUrl(access.baseUrl || fallbackBase), {
+        const target = await assertPublicHttpsTarget(chatUrl(access.baseUrl || fallbackBase));
+        const response = await fetchPinned(target, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${access.apiKey}`,
           },
           body: JSON.stringify(payload),
-          // The host check covers only the first URL, so a redirect could reach a private address.
-          redirect: 'error',
           signal: AbortSignal.timeout(20_000),
         });
         if (!response.ok) throw new Error(`Inference API error (${response.status})`);

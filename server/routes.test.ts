@@ -28,6 +28,7 @@ function call(method: string, url: string, headers: Record<string, string>): Pro
   req.url = url;
   req.headers = headers;
   req.resume = () => req;
+  req.socket = { remoteAddress: '127.0.0.1' } as IncomingMessage['socket'];
   const res = new EventEmitter() as ServerResponse & { statusCode: number; body: string };
   res.statusCode = 0;
   res.body = '';
@@ -74,6 +75,29 @@ describe('household routes', () => {
     expect(body.tasks).toEqual([]);
     expect(body.pendingApprovals).toEqual([]);
     expect(body.recentRuns).toEqual([]);
+  });
+
+  it('refuses household routes from another machine when no passcode is set', async () => {
+    const req = new EventEmitter() as IncomingMessage;
+    req.method = 'GET';
+    req.url = '/api/household';
+    req.headers = { host: '192.168.1.20:3000' };
+    req.resume = () => req;
+    req.socket = { remoteAddress: '192.168.1.20' } as IncomingMessage['socket'];
+    const res = new EventEmitter() as ServerResponse & { statusCode: number; body: string };
+    res.statusCode = 0;
+    res.body = '';
+    res.writeHead = ((status: number) => {
+      res.statusCode = status;
+      return res;
+    }) as ServerResponse['writeHead'];
+    res.end = ((body?: string) => {
+      res.body = body ?? '';
+      return res;
+    }) as ServerResponse['end'];
+    expect(handleApiRoutes(req, res)).toBe(true);
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toContain('AGORA_HOUSEHOLD_PASSCODE');
   });
 
   it('leaves other paths to the rest of the server', async () => {

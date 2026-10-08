@@ -24,6 +24,13 @@ export interface RoomRun {
   revisionLabel?: string;
 }
 
+let networkOpen = false;
+
+/** True while the process is bound beyond loopback and no demo host secret is set. */
+export function setRoomNetworkOpen(open: boolean): void {
+  networkOpen = open;
+}
+
 function hostCodeMatches(secret: string, code: string | undefined): boolean {
   if (!code) return false;
   const a = Buffer.from(secret);
@@ -45,6 +52,8 @@ export function normalizeChatText(text: unknown): string | null {
  * server/relay.ts owns the actual WebSocket connections and calls into this.
  *
  * With no demo host secret, the first connection to join becomes host.
+ * When this process is bound to every interface and that secret is unset,
+ * the host seat waits for a household session instead of the first caller.
  * When a secret is set, host authority is only the matching code or the
  * server-issued resume token. A display name never grants it.
  * Cabins are optional at join time:
@@ -112,7 +121,8 @@ export class RoomState {
     name: string,
     color: string,
     token?: string,
-    hostCode?: string
+    hostCode?: string,
+    sessionHost = false,
   ): { ok: true; info: PlayerInfo; hostToken?: string } | { ok: false; reason: 'room-full' } {
     const slotIndex = this.nextFreeSlot();
     if (slotIndex === null) {
@@ -123,7 +133,9 @@ export class RoomState {
     const codeOk = this.hostSecret ? hostCodeMatches(this.hostSecret, hostCode) : false;
     const isHost = this.hostSecret
       ? resumeHost || (codeOk && this.hostId === null)
-      : this.players.size === 0 || resumeHost;
+      : networkOpen
+        ? resumeHost || (sessionHost && this.hostId === null)
+        : this.players.size === 0 || resumeHost;
     if (isHost && !resumeHost) {
       this.hostToken = randomUUID();
       this.hostPlayerId = id;

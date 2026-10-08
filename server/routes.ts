@@ -12,7 +12,7 @@ import {
   setServerProviderFactory,
 } from './household/actions';
 import { resolveApproval } from './household/approvals';
-import { handleSession, householdLockEnabled, householdSessionActive } from './household/session';
+import { handleSession, householdLockEnabled, householdSessionActive, requestFromLoopback } from './household/session';
 import { readText } from './household/store';
 import { defaultServerProvider } from './llm/serverProvider';
 
@@ -103,6 +103,14 @@ function resume(req: IncomingMessage): void {
 function refuseLocked(req: IncomingMessage, res: ServerResponse): boolean {
   if (!householdLockEnabled() || householdSessionActive(req)) return false;
   sendJson(res, 401, { error: 'household_locked' });
+  resume(req);
+  return true;
+}
+
+/** With no passcode, household routes answer only on loopback. */
+function refuseOffLoopback(req: IncomingMessage, res: ServerResponse): boolean {
+  if (householdLockEnabled() || requestFromLoopback(req)) return false;
+  sendJson(res, 403, { error: 'Set AGORA_HOUSEHOLD_PASSCODE before using the household from another machine.' });
   resume(req);
   return true;
 }
@@ -218,7 +226,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
       return;
     }
     resume(req);
-    handleAlexaStatus(res);
+    await handleAlexaStatus(res);
     return;
   }
 
@@ -423,6 +431,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
 export function handleApiRoutes(req: IncomingMessage, res: ServerResponse): boolean {
   const match = matchPath(pathnameOf(req));
   if (match === null) return false;
+  if (refuseOffLoopback(req, res)) return true;
   if (match === 'bad-id') {
     if (refuseLocked(req, res)) return true;
     sendJson(res, 400, { error: 'Invalid id.' });
