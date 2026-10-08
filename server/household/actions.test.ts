@@ -265,7 +265,8 @@ describe('askAgora timeout', () => {
         timeoutMs: 4_000,
         create: () => new Promise(() => {}),
       });
-      await new Promise((resolve) => setImmediate(resolve));
+      // The timeout starts after real file reads, so wait until it is armed before moving the clock.
+      for (let i = 0; i < 200 && vi.getTimerCount() === 0; i++) await new Promise((resolve) => setImmediate(resolve));
       await vi.advanceTimersByTimeAsync(3_999);
       let settled = false;
       void pending.then(() => {
@@ -296,7 +297,8 @@ describe('askAgora timeout', () => {
           return { stop_reason: 'end_turn', content: [{ type: 'text', text: 'From the model.' }] };
         },
       });
-      await new Promise((resolve) => setImmediate(resolve));
+      // Both the 9 s budget and the model's 5 s wait are armed after real file reads.
+      for (let i = 0; i < 200 && vi.getTimerCount() < 2; i++) await new Promise((resolve) => setImmediate(resolve));
       await vi.advanceTimersByTimeAsync(4_000);
       expect(answered).toBe(false);
       await vi.advanceTimersByTimeAsync(1_000);

@@ -287,7 +287,7 @@ describe('MCP endpoint', () => {
   });
 
   it('keeps one copy of a fact, names who, and does not call a finished task the first open task', async () => {
-    const connected = await connect('dev-token');
+    const connected = await connect('dev-token-0123456789abcdef012345');
     const saved = await connected.callTool({
       name: 'remember',
       arguments: { fact: 'Mia is allergic to peanuts' },
@@ -329,7 +329,7 @@ describe('MCP endpoint', () => {
       },
     };
     setServerProviderFactory(async () => provider);
-    const connected = await connect('dev-token');
+    const connected = await connect('dev-token-0123456789abcdef012345');
     const listed = await connected.listTools();
     expect(listed.tools.map((tool) => tool.name)).toContain('web_research');
     expect(JSON.stringify(listed.tools.find((tool) => tool.name === 'web_research')?.outputSchema)).toContain('"url"');
