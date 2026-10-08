@@ -8,13 +8,17 @@ import { setDataDir } from './household/store';
 import { handleApiRoutes } from './routes';
 
 let dir = '';
+const savedPasscode = process.env.AGORA_HOUSEHOLD_PASSCODE;
 
 beforeEach(async () => {
+  delete process.env.AGORA_HOUSEHOLD_PASSCODE;
   dir = await mkdtemp(path.join(tmpdir(), 'agora-routes-'));
   setDataDir(dir);
 });
 
 afterEach(async () => {
+  if (savedPasscode === undefined) delete process.env.AGORA_HOUSEHOLD_PASSCODE;
+  else process.env.AGORA_HOUSEHOLD_PASSCODE = savedPasscode;
   await rm(dir, { recursive: true, force: true });
 });
 

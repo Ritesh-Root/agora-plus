@@ -1,4 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
+import { streamAlexaTurn } from './alexaSim/bridge';
+import { completeAlexaLink, handleAlexaLink, handleAlexaStatus } from './alexaSim/oauthClient';
+import { handleTts } from './alexaSim/tts';
 import {
   completeTask,
   deleteMemory,
@@ -9,6 +12,8 @@ import {
   setServerProviderFactory,
 } from './household/actions';
 import { resolveApproval } from './household/approvals';
+import { handleSession, householdLockEnabled, householdSessionActive } from './household/session';
+import { readText } from './household/store';
 import { defaultServerProvider } from './llm/serverProvider';
 
 setServerProviderFactory(defaultServerProvider);
@@ -21,13 +26,22 @@ class HttpError extends Error {
   }
 }
 
+const RUN_ID = /^[0-9a-f-]{36}$/i;
+
 type Match =
   | { kind: 'household' }
   | { kind: 'memory' }
   | { kind: 'memory-id'; id: string }
   | { kind: 'tasks' }
   | { kind: 'task-complete'; id: string }
-  | { kind: 'approval'; id: string };
+  | { kind: 'approval'; id: string }
+  | { kind: 'session' }
+  | { kind: 'tts' }
+  | { kind: 'alexa-link' }
+  | { kind: 'alexa-complete' }
+  | { kind: 'alexa-status' }
+  | { kind: 'alexa-turn' }
+  | { kind: 'run-document'; id: string };
 
 function pathnameOf(req: IncomingMessage): string {
   try {
@@ -67,7 +81,30 @@ function matchPath(pathname: string): Match | 'bad-id' | null {
     const id = safeId(approval[1]);
     return id ? { kind: 'approval', id } : 'bad-id';
   }
+  if (pathname === '/api/session') return { kind: 'session' };
+  if (pathname === '/api/tts') return { kind: 'tts' };
+  if (pathname === '/api/alexa-sim/link') return { kind: 'alexa-link' };
+  if (pathname === '/api/alexa-sim/link/complete') return { kind: 'alexa-complete' };
+  if (pathname === '/api/alexa-sim/status') return { kind: 'alexa-status' };
+  if (pathname === '/api/alexa-sim/turn') return { kind: 'alexa-turn' };
+  const runDoc = pathname.match(/^\/api\/runs\/([^/]+)\/document$/);
+  if (runDoc) {
+    const id = safeId(runDoc[1]);
+    if (!id || !RUN_ID.test(id)) return 'bad-id';
+    return { kind: 'run-document', id };
+  }
   return null;
+}
+
+function resume(req: IncomingMessage): void {
+  if (typeof req.resume === 'function') req.resume();
+}
+
+function refuseLocked(req: IncomingMessage, res: ServerResponse): boolean {
+  if (!householdLockEnabled() || householdSessionActive(req)) return false;
+  sendJson(res, 401, { error: 'household_locked' });
+  resume(req);
+  return true;
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -148,7 +185,102 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
   const write = method !== 'GET' && method !== 'HEAD';
   if (write && !writeAllowed(req)) {
     sendJson(res, 403, { error: 'This action is only allowed from the same site.' });
-    if (typeof req.resume === 'function') req.resume();
+    resume(req);
+    return;
+  }
+
+  if (match.kind === 'session') {
+    if (method === 'POST') {
+      const body = asRecord(await readJsonBody(req));
+      await handleSession(req, res, typeof body?.passcode === 'string' ? body.passcode : '');
+      return;
+    }
+    resume(req);
+    await handleSession(req, res, null);
+    return;
+  }
+
+  if (match.kind === 'tts') {
+    if (method !== 'POST') {
+      resume(req);
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const body = asRecord(await readJsonBody(req));
+    await handleTts(res, body?.text);
+    return;
+  }
+
+  if (match.kind === 'alexa-status') {
+    if (method !== 'GET') {
+      resume(req);
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    resume(req);
+    handleAlexaStatus(res);
+    return;
+  }
+
+  if (match.kind === 'alexa-link') {
+    if (method !== 'GET') {
+      resume(req);
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    resume(req);
+    handleAlexaLink(req, res);
+    return;
+  }
+
+  if (match.kind === 'alexa-complete') {
+    if (method !== 'POST') {
+      resume(req);
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const body = asRecord(await readJsonBody(req));
+    const linked = await completeAlexaLink(req, body?.code, body?.state);
+    if (!linked.ok) {
+      const failed = linked as { ok: false; status: number; error: string };
+      sendJson(res, failed.status, { error: failed.error });
+      return;
+    }
+    sendJson(res, 200, { linked: true });
+    return;
+  }
+
+  if (match.kind === 'alexa-turn') {
+    if (method !== 'POST') {
+      resume(req);
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const body = asRecord(await readJsonBody(req));
+    const utterance = typeof body?.utterance === 'string' ? body.utterance : '';
+    const conversationId = typeof body?.conversationId === 'string' ? body.conversationId : undefined;
+    await streamAlexaTurn(req, res, { utterance, ...(conversationId ? { conversationId } : {}) });
+    return;
+  }
+
+  if (match.kind === 'run-document') {
+    if (method !== 'GET' && method !== 'HEAD') {
+      resume(req);
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    resume(req);
+    const markdown = await readText(`runs/${match.id}.md`);
+    if (markdown === null) {
+      sendJson(res, 404, { error: 'That run has no document yet.' });
+      return;
+    }
+    if (res.headersSent || res.writableEnded) return;
+    res.writeHead(200, {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${match.id}.md"`,
+    });
+    res.end(method === 'HEAD' ? undefined : markdown);
     return;
   }
 
@@ -214,7 +346,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
       return;
     }
     if (method === 'DELETE') {
-      if (typeof req.resume === 'function') req.resume();
+      resume(req);
       const result = await deleteMemory(match.id);
       sendJson(res, result.ok ? 200 : 404, result);
       return;
@@ -247,12 +379,16 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
       sendJson(res, 405, { error: 'Method not allowed' });
       return;
     }
-    if (typeof req.resume === 'function') req.resume();
+    resume(req);
     const result = await completeTask(match.id);
     sendJson(res, result.ok ? 200 : 404, result);
     return;
   }
 
+  if (match.kind !== 'approval') {
+    sendJson(res, 404, { error: 'Not found' });
+    return;
+  }
   if (method !== 'POST') {
     sendJson(res, 405, { error: 'Method not allowed' });
     return;
@@ -288,9 +424,11 @@ export function handleApiRoutes(req: IncomingMessage, res: ServerResponse): bool
   const match = matchPath(pathnameOf(req));
   if (match === null) return false;
   if (match === 'bad-id') {
+    if (refuseLocked(req, res)) return true;
     sendJson(res, 400, { error: 'Invalid id.' });
     return true;
   }
+  if (match.kind !== 'session' && refuseLocked(req, res)) return true;
   void dispatch(req, res, match).catch((error) => {
     if (error instanceof HttpError) {
       sendJson(res, error.status, { error: error.message });

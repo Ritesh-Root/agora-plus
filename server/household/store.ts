@@ -70,3 +70,14 @@ export async function writeText(name: string, text: string): Promise<void> {
   const file = resolveSafe(name);
   await enqueue(file, () => atomicWrite(file, text));
 }
+
+/** Saved run markdown. Missing files are null. */
+export async function readText(name: string): Promise<string | null> {
+  const file = resolveSafe(name);
+  try {
+    return await readFile(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}

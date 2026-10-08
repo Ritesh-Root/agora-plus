@@ -52,3 +52,13 @@ AGORA+ can now think with Claude on Amazon Bedrock through the Mantle Messages A
 With Bedrock turned on, the office swarm and room chat still run when the browser did not send an API key. An agent whose own connection failed is still rejected.
 
 The live Bedrock call was not made. `aws sts get-caller-identity` in this shell returned `NoCredentials` (unable to locate credentials). There is no model id or latency to record.
+
+### 2026-10-08 — Phase 4: Simulated Alexa+ voice and the household panel
+
+The office header has two new buttons. Household opens a panel for memory, tasks, waiting approvals, recent runs, and the briefing suggestions. A person can add, edit, and delete memory, add and complete tasks, and approve or decline from that panel. A finished run has a Download .md link. Voice simulator opens `/alexa` in a new tab.
+
+`/alexa` is its own page, so the 3D office does not load there. The label is "AGORA+ voice · simulated Alexa+ experience (unofficial)". The screen uses the existing ink, paper, and butter colors. A person can type, or hold a button or the space bar to talk in Chromium. The server speaks a short fixed acknowledgement first ("Got it, saving that.", "Here's your day.", and the other stock lines), then calls this server's own MCP endpoint over HTTP. Tool calls show on the page with a status, the spoken line, how long they took, and whether the receipt was verified. A side effect stays on an amber ring until the person says yes or no. Speech tries Amazon Polly and, on a 503, uses the browser voice instead.
+
+If `AGORA_HOUSEHOLD_PASSCODE` is set, the household, memory, task, approval, run document, voice, and speech routes need the `agora_household` cookie. `POST /api/session` checks the passcode and sets that cookie for 12 hours. With the variable unset, those routes stay open for local development.
+
+The live Chrome demo did not finish a remember, briefing, or dinner plan. This shell still has no AWS credentials (`aws sts get-caller-identity` returned `NoCredentials`). Polly answered `503` `tts_unavailable`. A turn still sent the acknowledgement immediately: the first stream bytes were on the wire in 5 ms, and in Chromium the acknowledgement was on screen in 50 ms and 63 ms. The model step then failed with "Failed to resolve AWS credentials from the credential provider chain." A unit test with a fake model and a real temporary MCP server did show `remember`, a verified receipt, and a final answer. There is no Polly or Bedrock latency to quote.
