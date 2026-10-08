@@ -31,6 +31,11 @@ describe('routeFast', () => {
       args: { fact: 'Mia likes tea' },
     });
     expect(routeFast('remember', none)).toBeNull();
+    expect(routeFast('Forget that Mia is allergic to peanuts', none)).toEqual({
+      tool: 'forget',
+      args: { query: 'Mia is allergic to peanuts' },
+    });
+    expect(routeFast("don't forget the keys", none)?.tool).not.toBe('forget');
   });
 
   it('routes the morning briefing phrases', () => {

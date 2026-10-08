@@ -61,6 +61,8 @@ export interface PinnedRequest {
   headers?: Record<string, string>;
   body?: Uint8Array | string;
   signal?: AbortSignal;
+  /** Socket timeout. Model calls pass a longer budget than the proxy default. */
+  timeoutMs?: number;
 }
 
 /** Test hook. Production connects with `pinLookup`. */
@@ -98,7 +100,7 @@ function defaultPinnedTransport(request: PinnedRequest): Promise<Response> {
     });
     const fail = (error: unknown) => reject(error instanceof Error ? error : new Error('request failed'));
     req.on('error', fail);
-    req.setTimeout(30_000, () => req.destroy(new Error('timeout')));
+    req.setTimeout(request.timeoutMs ?? 30_000, () => req.destroy(new Error('timeout')));
     signal?.addEventListener('abort', () => req.destroy(signal.reason instanceof Error ? signal.reason : new Error('aborted')), { once: true });
     if (body) req.write(body);
     req.end();

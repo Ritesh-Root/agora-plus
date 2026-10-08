@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getRunRecord } from '../runEngine';
+import { getRunRecord, whenRunSettled } from '../runEngine';
 import { defaultServerProvider } from '../llm/serverProvider';
 import type { ServerProvider } from '../society/provider';
 import {
@@ -101,6 +101,29 @@ describe('askAgora', () => {
     expect(answer.speech).toContain('peanuts');
     expect(answer.toolCalls[0]).toMatchObject({ name: 'recall', ok: true });
   });
+
+  it('passes a named list through to list_tasks', async () => {
+    await addTask('milk', undefined, 'ui', { list: 'shopping' });
+    await addTask('call the dentist', undefined, 'ui');
+    const answer = await askAgora('What is on the shopping list?', {
+      create: async (params) => {
+        const last = params.messages[params.messages.length - 1];
+        const sawResult = JSON.stringify(last?.content ?? '').includes('tool_result');
+        if (!sawResult) {
+          return {
+            stop_reason: 'tool_use',
+            content: [{ type: 'tool_use', id: 'call_1', name: 'list_tasks', input: { list: 'shopping' } }],
+          };
+        }
+        const blob = JSON.stringify(last?.content ?? '');
+        const text = blob.includes('milk') && !blob.includes('dentist') ? 'Milk is on the shopping list.' : 'I do not know.';
+        return { stop_reason: 'end_turn', content: [{ type: 'text', text }] };
+      },
+    });
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.speech).toContain('Milk');
+  });
 });
 
 describe('requestRun', () => {
@@ -166,16 +189,8 @@ describe('requestRun', () => {
     expect(started.ok).toBe(true);
     const runId = started.runId ?? '';
 
-    const startedAt = Date.now();
-    let saved: { status?: string; tasks?: { title: string }[]; spokenSummary?: string } | null = null;
-    while (Date.now() - startedAt < 5000) {
-      const record = await getRunRecord(runId);
-      if (record && record.status !== 'running' && record.status !== 'cancel_requested') {
-        saved = record;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 15));
-    }
+    await whenRunSettled(runId);
+    const saved = await getRunRecord(runId);
     expect(saved?.status).toBe('complete');
     expect(saved?.tasks?.map((task) => task.title)).toEqual([
       'Check the pantry',
@@ -248,6 +263,17 @@ describe('forget', () => {
     if (!pending.ok) return;
     expect(pending.summary).toBe('Forget that Mia is allergic to peanuts? Say yes or no.');
     expect(pending.approvalId).toEqual(expect.any(String));
+  });
+
+  it('keeps a long fact whole in the approval summary', async () => {
+    const fact = `Mia is allergic to peanuts and ${'tree nuts '.repeat(12).trim()}`;
+    expect(fact.length).toBeGreaterThan(80);
+    await addMemory(fact, ['allergy'], 'ui');
+    const pending = await forget(fact);
+    expect(pending.ok).toBe(true);
+    if (!pending.ok) return;
+    expect(pending.summary).toBe(`Forget that ${fact}? Say yes or no.`);
+    expect(pending.summary).not.toContain('…');
   });
 });
 

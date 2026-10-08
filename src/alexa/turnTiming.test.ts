@@ -4,6 +4,7 @@ import {
   captionAck,
   captionAckFinished,
   captionAnswer,
+  visibleApproval,
   createTurnClock,
   emptyCaption,
   isDecline,
@@ -77,6 +78,27 @@ describe('caption', () => {
   it('shows the answer immediately when there was no acknowledgement', () => {
     const caption = captionAnswer(emptyCaption(), 'Nothing urgent at home.');
     expect(caption.visible).toBe('Nothing urgent at home.');
+  });
+});
+
+describe('visibleApproval', () => {
+  const waiting = { name: 'forget', status: 'needs_approval' };
+
+  it('keeps the card through a later turn that did not approve', () => {
+    const turns = [
+      { tools: [waiting] },
+      { tools: [] },
+    ];
+    expect(visibleApproval(turns, 'approval')).toBe(waiting);
+    expect(visibleApproval(turns, 'idle')).toBeUndefined();
+  });
+
+  it('hides the card once approve_action succeeds', () => {
+    const turns = [
+      { tools: [waiting] },
+      { tools: [{ name: 'approve_action', status: 'ok' }] },
+    ];
+    expect(visibleApproval(turns, 'approval')).toBeUndefined();
   });
 });
 

@@ -14,6 +14,24 @@ import { ACK_PHRASES } from './ack';
 
 const CACHE_MAX = 100;
 const TEXT_MAX = 1500;
+const TTS_DEADLINE_MS = 4_000;
+
+function ttsOff(): boolean {
+  return process.env.AGORA_TTS === '0';
+}
+
+function deadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('tts timeout')), ms);
+    work.then((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    }, (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
 
 export interface PollySpeaker {
   send(command: SynthesizeSpeechCommand): Promise<{ AudioStream?: { transformToByteArray(): Promise<Uint8Array> } }>;
@@ -92,7 +110,7 @@ async function synthesize(text: string): Promise<Uint8Array> {
 
 /** Fills the cache with the acknowledgement phrases. Failures are ignored. */
 export function warmAcknowledgements(): void {
-  if (warming) return;
+  if (warming || ttsOff()) return;
   warming = true;
   void (async () => {
     for (const phrase of ACK_PHRASES) {
@@ -121,8 +139,12 @@ export async function handleTts(res: ServerResponse, text: unknown): Promise<voi
     sendJson(res, 400, { error: 'Text is too long.' });
     return;
   }
+  if (ttsOff()) {
+    sendJson(res, 503, { error: 'tts_unavailable' });
+    return;
+  }
   try {
-    const bytes = await synthesize(text.trim());
+    const bytes = await deadline(synthesize(text.trim()), TTS_DEADLINE_MS);
     if (res.headersSent || res.writableEnded) return;
     res.writeHead(200, {
       'Content-Type': 'audio/mpeg',

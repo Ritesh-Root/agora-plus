@@ -8,7 +8,7 @@ import { addMemory } from '../household/memoryStore';
 import { setDataDir } from '../household/store';
 import { defaultServerProvider } from '../llm/serverProvider';
 import type { ToolCreate } from '../llm/toolLoop';
-import { getRunRecord } from '../runEngine';
+import { getRunRecord, whenRunSettled } from '../runEngine';
 import type { ServerProvider } from '../society/provider';
 import { setServerProviderFactory } from '../household/actions';
 import { handleMcpRoutes } from '../mcp/http';
@@ -256,17 +256,9 @@ describe('alexa turn bridge', () => {
     expect(again.some((event) => event.data.runId)).toBe(false);
     expect(again[again.length - 1]?.data.text).not.toContain(runId);
 
-    const startedAt = Date.now();
-    let status = 'running';
-    while (Date.now() - startedAt < 4000) {
-      const record = await getRunRecord(runId);
-      if (record && record.status !== 'running' && record.status !== 'cancel_requested') {
-        status = record.status;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 15));
-    }
-    expect(status === 'running').toBe(false);
+    await whenRunSettled(runId);
+    const record = await getRunRecord(runId);
+    expect(record?.status === 'running').toBe(false);
   });
 
   it('refuses approve_action when the model asks for it', async () => {
@@ -340,8 +332,12 @@ describe('alexa turn bridge', () => {
     let ran = 0;
     let stopped = false;
     let started: () => void = () => {};
+    let markStopped: () => void = () => {};
     const startedTurn = new Promise<void>((resolve) => {
       started = resolve;
+    });
+    const stoppedPromise = new Promise<void>((resolve) => {
+      markStopped = resolve;
     });
     const create: ToolCreate = (params) => new Promise((resolve, reject) => {
       started();
@@ -355,6 +351,7 @@ describe('alexa turn bridge', () => {
       const stop = () => {
         stopped = true;
         clearTimeout(timer);
+        markStopped();
         reject(new Error('disconnected'));
       };
       if (params.signal?.aborted) stop();
@@ -376,19 +373,10 @@ describe('alexa turn bridge', () => {
         if (chunk.done) break;
       }
     })();
-    const startedOrTimeout = Promise.race([
-      startedTurn,
-      new Promise<void>((_resolve, reject) => {
-        setTimeout(() => reject(new Error('model did not start')), 2000);
-      }),
-    ]);
-    await startedOrTimeout;
+    await startedTurn;
     controller.abort();
     await reading.catch(() => undefined);
-    const deadline = Date.now() + 1000;
-    while (!stopped && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    await stoppedPromise;
     expect(stopped).toBe(true);
     expect(ran).toBe(0);
   });

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import type { IncomingMessage, ServerResponse } from 'http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 import { handleApiRoutes } from '../routes';
 import { resetTts, setPollyClient, type PollySpeaker } from './tts';
@@ -8,6 +8,7 @@ import { resetTts, setPollyClient, type PollySpeaker } from './tts';
 afterEach(() => {
   resetTts();
   delete process.env.AGORA_HOUSEHOLD_PASSCODE;
+  delete process.env.AGORA_TTS;
 });
 
 function call(json: unknown): Promise<{ status: number; body: string; type: string }> {
@@ -56,5 +57,40 @@ describe('POST /api/tts', () => {
     const result = await call({ text: 'On it.' });
     expect(result.status).toBe(503);
     expect(JSON.parse(result.body)).toEqual({ error: 'tts_unavailable' });
+  });
+
+  it('returns 503 without calling Polly when AGORA_TTS=0', async () => {
+    process.env.AGORA_TTS = '0';
+    let called = false;
+    setPollyClient({
+      async send() {
+        called = true;
+        return { AudioStream: { async transformToByteArray() { return new Uint8Array([1]); } } };
+      },
+    });
+    const result = await call({ text: 'On it.' });
+    expect(result.status).toBe(503);
+    expect(called).toBe(false);
+    delete process.env.AGORA_TTS;
+  });
+
+  it('stops waiting when Polly does not answer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      setPollyClient({ send: () => new Promise(() => {}) });
+      const pending = call({ text: 'On it.' });
+      await vi.advanceTimersByTimeAsync(3_999);
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await pending;
+      expect(result.status).toBe(503);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

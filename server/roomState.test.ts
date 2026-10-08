@@ -75,6 +75,10 @@ describe('room run', () => {
     expect(room.currentRun()?.synthesis).toBe('');
     expect(room.finishRun(second.run.id, { status: 'complete', synthesis: 'new', wordCount: 1 })).toBe(true);
     expect(room.currentRun()?.synthesis).toBe('new');
+    room.noteSpokenSummary(second.run.id, 'Skip peanuts.');
+    expect(room.currentRun()?.spokenSummary).toBe('Skip peanuts.');
+    room.noteSpokenSummary('not-this-run', 'nope');
+    expect(room.currentRun()?.spokenSummary).toBe('Skip peanuts.');
   });
 
   it('keeps the host seat for a household session when the process is on the network', () => {

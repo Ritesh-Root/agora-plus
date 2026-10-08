@@ -388,4 +388,32 @@ describe('MCP endpoint', () => {
     expect(meta?.ui?.resourceUri).toBe(uri);
     expect(taskMeta?.ui?.resourceUri).toBe(uri);
   }, 20000);
+
+  it('adds, lists, and completes a task, and serves prompts plus household resources', async () => {
+    const connected = await connect('dev-token-0123456789abcdef012345');
+    const added = await connected.callTool({
+      name: 'add_task',
+      arguments: { title: 'Buy milk', list: 'shopping', who: 'Mia' },
+    });
+    expect(structured(added).status).toBe('ok');
+    expect((structured(added).receipt as { verified?: boolean }).verified).toBe(true);
+    const open = await connected.callTool({
+      name: 'list_tasks',
+      arguments: { status: 'open', list: 'shopping' },
+    });
+    expect(String(structured(open).speech)).toContain('Buy milk');
+    const finished = await connected.callTool({
+      name: 'complete_task',
+      arguments: { taskIdOrTitle: 'Buy milk' },
+    });
+    expect((structured(finished).receipt as { verified?: boolean }).verified).toBe(true);
+
+    const prompts = await connected.listPrompts();
+    expect(prompts.prompts.map((prompt) => prompt.name).sort()).toEqual(['morning-briefing', 'plan-a-week-of-meals']);
+    const memory = await connected.readResource({ uri: 'agora://memory' });
+    expect(memory.contents[0]?.mimeType).toBe('text/markdown');
+    const tasks = await connected.readResource({ uri: 'agora://tasks' });
+    expect(tasks.contents[0]?.text).toContain('Buy milk');
+    expect(tasks.contents[0]?.text).toContain('shopping');
+  });
 });

@@ -15,6 +15,7 @@ import {
   removeMemory,
   saveMemory,
   searchMemory,
+  speakRecall,
   updateMemory,
   type HouseholdSource,
   type MemoryEntry,
@@ -47,11 +48,6 @@ export function getServerProvider(): Promise<ServerProvider> {
 
 function receipt(action: string, id: string, verified: boolean): Receipt {
   return { action, id, verified, at: new Date().toISOString() };
-}
-
-function clip(text: string, max: number): string {
-  const trimmed = text.trim();
-  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
 }
 
 function householdBrief(goal: string, memories: MemoryEntry[]): string {
@@ -135,7 +131,7 @@ export async function forget(memoryIdOrQuery: string) {
   const byId = (await listMemory()).find((entry) => entry.id === query);
   const target = byId ?? (await searchMemory(query))[0];
   if (!target) return { ok: false as const, error: 'No matching memory.' };
-  const approval = requestApproval('forget', `Forget that ${clip(target.text, 80)}? Say yes or no.`, { id: target.id });
+  const approval = requestApproval('forget', `Forget that ${target.text.trim()}? Say yes or no.`, { id: target.id });
   return {
     ok: true as const,
     status: 'needs_approval' as const,
@@ -347,14 +343,13 @@ function bedrockOf(provider: ServerProvider): BedrockProvider | null {
   return named as BedrockProvider;
 }
 
-function recallAnswer(memories: MemoryEntry[]) {
-  const best = memories[0];
-  const speech = best ? toSpeech(`I remember this: ${best.text}`) : "I don't know.";
+function recallAnswer(question: string, memories: MemoryEntry[]) {
+  const spoken = speakRecall(question, memories);
   return {
     ok: true as const,
-    speech: speech || "I don't know.",
-    answer: speech || "I don't know.",
-    memories: memories.slice(0, 5),
+    speech: spoken.speech,
+    answer: spoken.speech,
+    memories: spoken.memories,
     toolCalls: [] as { name: string; input: unknown; ok: boolean; ms: number }[],
   };
 }
@@ -423,7 +418,8 @@ async function executeAsk(name: string, input: unknown): Promise<unknown> {
       return recall(inputString(fields, 'query'));
     case 'list_tasks': {
       const status = fields.status === 'open' || fields.status === 'done' ? fields.status : undefined;
-      return listTasks(status);
+      const list = inputString(fields, 'list').trim();
+      return listTasks(status, list || undefined);
     }
     case 'daily_briefing':
       return dailyBriefing();
@@ -510,7 +506,7 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
       create = undefined;
     }
   }
-  if (!create) return recallAnswer(memories);
+  if (!create) return recallAnswer(trimmed, memories);
 
   const sources: ResearchSource[] = [];
   const tools = askTools();
@@ -535,10 +531,10 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
       },
     }), timeoutMs);
     if (loop.stopReason === 'refusal' || !loop.text.trim()) {
-      const fallback = recallAnswer(memories);
+      const fallback = recallAnswer(trimmed, memories);
       return { ...fallback, toolCalls: loop.toolCalls, ...(sources.length > 0 ? { sources } : {}) };
     }
-    const speech = toSpeech(loop.text) || recallAnswer(memories).speech;
+    const speech = toSpeech(loop.text) || recallAnswer(trimmed, memories).speech;
     return {
       ok: true as const,
       speech,
@@ -548,7 +544,7 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
       ...(sources.length > 0 ? { sources } : {}),
     };
   } catch {
-    return recallAnswer(memories);
+    return recallAnswer(trimmed, memories);
   } finally {
     clearTimeout(timer);
   }

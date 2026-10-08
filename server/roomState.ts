@@ -22,6 +22,7 @@ export interface RoomRun {
   synthesis: string;
   wordCount?: number;
   revisionLabel?: string;
+  spokenSummary?: string;
 }
 
 let networkOpen = false;
@@ -278,6 +279,13 @@ export class RoomState {
     this.hostToken = null;
     this.cabinPoiIds = null;
     this.sessionEpoch += 1;
+  }
+
+  /** Keeps the spoken line on the room run so a later join can restore it. */
+  public noteSpokenSummary(id: string, summary: string): void {
+    if (!this.run || this.run.id !== id) return;
+    const text = summary.trim();
+    if (text) this.run.spokenSummary = text;
   }
 
   public finishRun(id: string, patch: { status: 'complete' | 'needs_revision'; synthesis: string; wordCount?: number; revisionLabel?: string }): boolean {

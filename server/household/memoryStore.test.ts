@@ -18,9 +18,17 @@ afterEach(async () => {
 
 describe('memoryStore', () => {
   it('adds, searches, updates, and removes memories', async () => {
-    const first = await addMemory('Mia likes pasta', ['food'], 'ui');
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    const second = await addMemory('Mia is allergic to peanuts', ['allergy', 'mia'], 'voice');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-08T12:00:00.000Z'));
+    let first: Awaited<ReturnType<typeof addMemory>>;
+    let second: Awaited<ReturnType<typeof addMemory>>;
+    try {
+      first = await addMemory('Mia likes pasta', ['food'], 'ui');
+      vi.setSystemTime(new Date('2026-10-08T12:00:01.000Z'));
+      second = await addMemory('Mia is allergic to peanuts', ['allergy', 'mia'], 'voice');
+    } finally {
+      vi.useRealTimers();
+    }
     const ranked = await searchMemory('peanuts allergy');
     expect(ranked[0]?.id).toBe(second.id);
     expect(ranked.some((entry) => entry.id === first.id)).toBe(false);

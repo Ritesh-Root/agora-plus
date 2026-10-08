@@ -16,6 +16,7 @@ const BRIEFING = new Set(["what's my briefing", 'whats my briefing', 'brief me',
 const LIST = new Set(["what's on my list", 'whats on my list', 'what are my tasks', 'list my tasks']);
 
 const REMEMBER = /^(?:remember|note|don['’]?t forget)(?:\s+that)?\s+(.+)$/i;
+const FORGET = /^(?:forget|remove)(?:\s+that)?\s+(.+)$/i;
 const ADD_SHOPPING = /^add\s+(.+?)\s+to\s+(?:my\s+|the\s+)(shopping|grocery)\s+list$/i;
 const ADD = /^add\s+(.+?)\s+to\s+my\s+(?:list|tasks|to-do|todo)$/i;
 const PUT_SHOPPING = /^put\s+(.+?)\s+on\s+(?:my\s+|the\s+)?(shopping|grocery)\s+list$/i;
@@ -47,6 +48,11 @@ function filled(value: string): string | null {
 function remember(text: string): FastRoute | null {
   const fact = filled(REMEMBER.exec(text)?.[1] ?? '');
   return fact ? { tool: 'remember', args: { fact } } : null;
+}
+
+function forgetFact(text: string): FastRoute | null {
+  const query = filled(FORGET.exec(text)?.[1] ?? '');
+  return query ? { tool: 'forget', args: { query } } : null;
 }
 
 function addTask(text: string): FastRoute | null {
@@ -143,6 +149,7 @@ function commandsOne(text: string): FastRoute | null {
     exact(text, BRIEFING, 'daily_briefing'),
     listRoute(text),
     remember(text),
+    forgetFact(text),
     addTask(text),
     completeTask(text),
     plan(text),

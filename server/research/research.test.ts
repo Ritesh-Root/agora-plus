@@ -31,6 +31,16 @@ describe('research URL guard', () => {
     expect(fetched).toBe(false);
   });
 
+  it('asks the Jina reader for a public page instead of fetching that host', async () => {
+    let requested = '';
+    const text = await readUrl('http://example.com/notes', async (input) => {
+      requested = String(input);
+      return new Response('# Notes about peanuts');
+    }, publicResolve);
+    expect(requested).toBe('https://r.jina.ai/http://example.com/notes');
+    expect(text).toContain('peanuts');
+  });
+
   it('searches only when Jev says proceed, and stops after five searches', async () => {
     process.env.AGORA_DECIDER = 'jev';
     try {
