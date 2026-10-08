@@ -29,6 +29,8 @@ export interface Conversation {
   system: string;
   tools: ToolDefinition[] | null;
   mcpTools: StoredTool[] | null;
+  /** Set when a tool asks for a yes. Cleared after approve_action. */
+  pendingApprovalId?: string;
   updatedAt: number;
 }
 

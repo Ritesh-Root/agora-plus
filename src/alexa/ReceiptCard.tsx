@@ -34,11 +34,13 @@ export function ReceiptCard({
   busy,
   onApprove,
   onDecline,
+  showActions = true,
 }: {
   card: ToolCard;
   busy: boolean;
   onApprove: () => void;
   onDecline: () => void;
+  showActions?: boolean;
 }) {
   return (
     <article className="rounded-2xl border border-paper/15 bg-ink/60 p-3 text-left">
@@ -50,14 +52,14 @@ export function ReceiptCard({
       </div>
       {card.speech ? <p className="mt-2 text-sm leading-snug text-paper">{card.speech}</p> : null}
       {card.receipt ? (
-        <p className="mt-2 text-[11px] text-paper/70">
+        <p className="mt-2 text-[11px] tabular-nums text-paper/70">
           {card.receipt.verified ? 'verified ✓' : 'not verified'}
           {typeof card.ms === 'number' ? ` · ${card.ms} ms` : ''}
         </p>
       ) : typeof card.ms === 'number' ? (
-        <p className="mt-2 text-[11px] text-paper/70">{card.ms} ms</p>
+        <p className="mt-2 text-[11px] tabular-nums text-paper/70">{card.ms} ms</p>
       ) : null}
-      {card.status === 'needs_approval' ? (
+      {card.status === 'needs_approval' && showActions ? (
         <div className="mt-3">
           <p className="text-sm text-paper">{card.summary || card.speech}</p>
           <div className="mt-2 flex gap-2">

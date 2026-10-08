@@ -10,7 +10,7 @@ export default defineConfig(({mode}) => {
   // The shell wins over .env, and an unset name stays unset (assigning undefined would store "undefined").
   const serverNames = [
     'DASHSCOPE_API_KEY', 'TYPESAFE_API_KEY', 'JEV_API_KEY', 'TYPESAFE_BASE_URL', 'JEV_MODEL', 'EXA_API_KEY',
-    'FIRECRAWL_API_KEY', 'ALEXA_SIM_MODEL',
+    'FIRECRAWL_API_KEY', 'ALEXA_SIM_MODEL', 'ALEXA_SIM_FAST_PATH',
   ];
   const serverPrefixes = ['AGORA_', 'AWS_', 'BEDROCK_', 'POLLY_'];
   for (const [name, value] of Object.entries(env)) {

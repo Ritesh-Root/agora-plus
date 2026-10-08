@@ -4,7 +4,8 @@ import type { BedrockCreateParams } from '../llm/bedrockProvider';
 import { getBedrock } from '../llm/serverProvider';
 import { runToolLoop, type ToolCreate, type ToolCreateParams, type ToolCreateResult, type ToolDefinition } from '../llm/toolLoop';
 import { acknowledge } from './ack';
-import { openConversation, saveConversation, type StoredTool } from './conversation';
+import { openConversation, saveConversation, type Conversation, type StoredTool } from './conversation';
+import { fastPathEnabled, routeFast, type FastRoute } from './fastPath';
 import { alexaModelName, bearerFetch, selfBase, tokensForTurn } from './oauthClient';
 import { formatSseEvent } from './sse';
 
@@ -14,6 +15,7 @@ import { formatSseEvent } from './sse';
  */
 
 const LINK_MESSAGE = 'Press Link AGORA+ to connect this household.';
+const MODEL_OFFLINE = "My thinking model isn't connected on this server yet. Simple requests like remembering, tasks and your briefing still work.";
 
 let modelOverride: ToolCreate | null = null;
 
@@ -31,6 +33,26 @@ function publicError(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
   if (!message || /secret|token|bearer|akia/i.test(message)) return 'The voice turn failed.';
   return message.slice(0, 240);
+}
+
+function missingCredentials(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : '';
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /credential|NoCredentials|not configured|UnrecognizedClient|ExpiredToken/i.test(`${name} ${message}`);
+}
+
+/** Shown in the trace. Spoken text stays separate when the model has no credentials. */
+function technicalDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (!message.trim() || /akia|secret|bearer\s+[a-z0-9._~+/-]/i.test(message)) return 'The voice turn failed.';
+  return message.slice(0, 500);
+}
+
+function modelFailure(error: unknown): { message: string; detail: string } {
+  return {
+    message: missingCredentials(error) ? MODEL_OFFLINE : publicError(error),
+    detail: technicalDetail(error),
+  };
 }
 
 async function bedrockCreate(params: ToolCreateParams): Promise<ToolCreateResult> {
@@ -118,6 +140,87 @@ function asArgs(input: unknown): Record<string, unknown> {
   return record ?? {};
 }
 
+function noteTool(conversation: Conversation, name: string, parsed: ParsedTool): void {
+  if (name === 'approve_action') {
+    conversation.pendingApprovalId = undefined;
+    return;
+  }
+  if (parsed.status === 'needs_approval' && parsed.approvalId) {
+    conversation.pendingApprovalId = parsed.approvalId;
+  }
+}
+
+function finalSpeech(parsed: ParsedTool): string {
+  const speech = parsed.speech.trim() || 'Done.';
+  if (parsed.status !== 'needs_approval') return speech;
+  if (speech.toLowerCase().includes('should i go ahead')) return speech;
+  return `${speech} Should I go ahead?`;
+}
+
+function appendPlain(conversation: Conversation, user: string, assistant: string): void {
+  saveConversation(conversation, [
+    ...conversation.messages,
+    { role: 'user', content: user },
+    { role: 'assistant', content: assistant },
+  ]);
+}
+
+function toolPayload(name: string, parsed: ParsedTool, ms: number): Record<string, unknown> {
+  return {
+    name,
+    status: parsed.status,
+    speech: parsed.speech,
+    ...(parsed.receipt ? { receipt: parsed.receipt } : {}),
+    ...(parsed.approvalId ? { approvalId: parsed.approvalId } : {}),
+    ms,
+  };
+}
+
+/** One MCP call chosen by rule, then the tool's own speech. */
+async function speakFast(options: {
+  route: FastRoute;
+  client: Client;
+  conversation: Conversation;
+  utterance: string;
+  ackMs: number;
+  started: number;
+  detached: () => boolean;
+  write: (event: string, data: unknown) => void;
+}): Promise<void> {
+  const { route, client, conversation, utterance, ackMs, started, write } = options;
+  const toolStarted = Date.now();
+  const firstToolMs = toolStarted - started;
+  write('tool_call', { name: route.tool, input: route.args });
+  const finish = (text: string) => {
+    if (options.detached()) return;
+    appendPlain(conversation, utterance, text);
+    write('final', {
+      text,
+      conversationId: conversation.id,
+      timings: { ackMs, firstToolMs, totalMs: Date.now() - started, route: 'fast' },
+    });
+  };
+  try {
+    const result = await client.callTool({ name: route.tool, arguments: route.args });
+    if (options.detached()) return;
+    const parsed = parseTool(result);
+    noteTool(conversation, route.tool, parsed);
+    write('tool_result', toolPayload(route.tool, parsed, Date.now() - toolStarted));
+    if (parsed.status === 'needs_approval' && parsed.approvalId) {
+      write('approval_required', {
+        approvalId: parsed.approvalId,
+        summary: parsed.summary || parsed.speech,
+      });
+    }
+    finish(finalSpeech(parsed));
+  } catch {
+    if (options.detached()) return;
+    const speech = 'That did not work.';
+    write('tool_result', { name: route.tool, status: 'error', speech, ms: Date.now() - toolStarted });
+    finish(speech);
+  }
+}
+
 /**
  * Streams one turn as server-sent events.
  * Writes `ack` before connecting to MCP or calling the model.
@@ -184,6 +287,24 @@ export async function streamAlexaTurn(
     client = new Client({ name: 'agora-plus-voice', version: '0.1.0' });
     await client.connect(transport);
     if (detached) return;
+    const connected = client;
+
+    if (fastPathEnabled()) {
+      const routed = routeFast(utterance, conversation);
+      if (routed) {
+        await speakFast({
+          route: routed,
+          client: connected,
+          conversation,
+          utterance,
+          ackMs,
+          started,
+          detached: () => detached,
+          write,
+        });
+        return;
+      }
+    }
 
     const listed = await client.listTools();
     if (!conversation.tools) {
@@ -192,73 +313,74 @@ export async function streamAlexaTurn(
     }
     const tools = conversation.tools;
     if (!tools) throw new Error('The household tools could not be listed.');
-    const connected = client;
 
     let firstToolMs: number | undefined;
     const history = conversation.messages.map((message) => ({ role: message.role, content: message.content }));
     history.push({ role: 'user', content: utterance });
 
-    const loop = await runToolLoop({
-      create: (params) => {
-        if (detached) return Promise.reject(new Error('disconnected'));
-        return (modelOverride ?? bedrockCreate)(params);
-      },
-      model: alexaModelName(),
-      system: conversation.system,
-      tools,
-      messages: history,
-      maxTokens: 400,
-      execute: async (name, toolInput) => {
-        if (detached) throw new Error('disconnected');
-        const startedTool = Date.now();
-        try {
-          const result = await connected.callTool({ name, arguments: asArgs(toolInput) });
-          const parsed = parseTool(result);
-          const ms = Date.now() - startedTool;
-          write('tool_result', {
-            name,
-            status: parsed.status,
-            speech: parsed.speech,
-            ...(parsed.receipt ? { receipt: parsed.receipt } : {}),
-            ...(parsed.approvalId ? { approvalId: parsed.approvalId } : {}),
-            ms,
-          });
-          if (parsed.status === 'needs_approval' && parsed.approvalId) {
-            write('approval_required', {
-              approvalId: parsed.approvalId,
-              summary: parsed.summary || parsed.speech,
-            });
+    try {
+      const loop = await runToolLoop({
+        create: (params) => {
+          if (detached) return Promise.reject(new Error('disconnected'));
+          return (modelOverride ?? bedrockCreate)(params);
+        },
+        model: alexaModelName(),
+        system: conversation.system,
+        tools,
+        messages: history,
+        maxTokens: 400,
+        execute: async (name, toolInput) => {
+          if (detached) throw new Error('disconnected');
+          const startedTool = Date.now();
+          try {
+            const result = await connected.callTool({ name, arguments: asArgs(toolInput) });
+            const parsed = parseTool(result);
+            const ms = Date.now() - startedTool;
+            noteTool(conversation, name, parsed);
+            write('tool_result', toolPayload(name, parsed, ms));
+            if (parsed.status === 'needs_approval' && parsed.approvalId) {
+              write('approval_required', {
+                approvalId: parsed.approvalId,
+                summary: parsed.summary || parsed.speech,
+              });
+            }
+            return parsed.forModel;
+          } catch (error) {
+            if (detached) throw error;
+            const ms = Date.now() - startedTool;
+            const speech = 'That did not work.';
+            write('tool_result', { name, status: 'error', speech, ms });
+            return { speech, status: 'error' };
           }
-          return parsed.forModel;
-        } catch (error) {
-          if (detached) throw error;
-          const ms = Date.now() - startedTool;
-          const speech = 'That did not work.';
-          write('tool_result', { name, status: 'error', speech, ms });
-          return { speech, status: 'error' };
-        }
-      },
-      onEvent: (event) => {
-        if (event.type !== 'tool_call') return;
-        if (firstToolMs === undefined) firstToolMs = Date.now() - started;
-        write('tool_call', { name: event.name, input: event.input });
-      },
-    });
-
-    if (!detached) {
-      saveConversation(conversation, loop.messages);
-      write('final', {
-        text: loop.text.trim() || 'Done.',
-        conversationId: conversation.id,
-        timings: {
-          ackMs,
-          ...(firstToolMs !== undefined ? { firstToolMs } : {}),
-          totalMs: Date.now() - started,
+        },
+        onEvent: (event) => {
+          if (event.type !== 'tool_call') return;
+          if (firstToolMs === undefined) firstToolMs = Date.now() - started;
+          write('tool_call', { name: event.name, input: event.input });
         },
       });
+
+      if (!detached) {
+        saveConversation(conversation, loop.messages);
+        write('final', {
+          text: loop.text.trim() || 'Done.',
+          conversationId: conversation.id,
+          timings: {
+            ackMs,
+            ...(firstToolMs !== undefined ? { firstToolMs } : {}),
+            totalMs: Date.now() - started,
+            route: 'model',
+          },
+        });
+      }
+    } catch (error) {
+      if (!detached) {
+        const failure = modelFailure(error);
+        write('error', { message: failure.message, detail: failure.detail, route: 'model' });
+      }
     }
   } catch (error) {
-    if (!detached) write('error', { message: publicError(error) });
+    if (!detached) write('error', { message: publicError(error), detail: technicalDetail(error) });
   } finally {
     finished = true;
     res.removeListener('close', onClose);

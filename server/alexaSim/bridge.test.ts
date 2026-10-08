@@ -13,7 +13,7 @@ import { setAlexaModel } from './bridge';
 import { resetConversations } from './conversation';
 import { resetAlexaAuth } from './oauthClient';
 
-const ENV = ['AGORA_MCP_TOKEN', 'AGORA_SELF_URL', 'AGORA_HOUSEHOLD_PASSCODE', 'AGORA_OAUTH_CLIENT_ID', 'AGORA_OAUTH_CLIENT_SECRET', 'AGORA_TOKEN_SECRET', 'AGORA_SERVER_LLM'] as const;
+const ENV = ['AGORA_MCP_TOKEN', 'AGORA_SELF_URL', 'AGORA_HOUSEHOLD_PASSCODE', 'AGORA_OAUTH_CLIENT_ID', 'AGORA_OAUTH_CLIENT_SECRET', 'AGORA_TOKEN_SECRET', 'AGORA_SERVER_LLM', 'ALEXA_SIM_FAST_PATH'] as const;
 const saved = new Map<string, string | undefined>();
 
 let dir = '';
@@ -39,6 +39,7 @@ function parseSse(text: string): { event: string; data: Record<string, unknown> 
 beforeEach(async () => {
   for (const key of ENV) saved.set(key, process.env[key]);
   process.env.AGORA_MCP_TOKEN = 'dev-token';
+  delete process.env.ALEXA_SIM_FAST_PATH;
   delete process.env.AGORA_SELF_URL;
   delete process.env.AGORA_HOUSEHOLD_PASSCODE;
   delete process.env.AGORA_OAUTH_CLIENT_ID;
@@ -82,7 +83,8 @@ afterEach(async () => {
 });
 
 describe('alexa turn bridge', () => {
-  it('acks first, then remembers through MCP and finishes', async () => {
+  it('acks first, then remembers through the model and finishes', async () => {
+    process.env.ALEXA_SIM_FAST_PATH = '0';
     let step = 0;
     const create: ToolCreate = async () => {
       step += 1;
@@ -117,5 +119,45 @@ describe('alexa turn bridge', () => {
     expect(result?.status).toBe('ok');
     expect((result?.receipt as { verified?: boolean } | undefined)?.verified).toBe(true);
     expect(events[finalAt]?.data.text).toBe('Saved.');
+    expect(events[finalAt]?.data.timings).toMatchObject({ route: 'model' });
+  });
+
+  it('remembers on the fast path when the model has no credentials', async () => {
+    const create: ToolCreate = async () => {
+      throw new Error('Failed to resolve AWS credentials from the credential provider chain.');
+    };
+    setAlexaModel(create);
+    const response = await fetch(`${base}/api/alexa-sim/turn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ utterance: 'remember X' }),
+    });
+    expect(response.status).toBe(200);
+    const events = parseSse(await response.text());
+    expect(events.some((event) => event.event === 'error')).toBe(false);
+    const result = events.find((event) => event.event === 'tool_result');
+    expect(result?.data.status).toBe('ok');
+    expect((result?.data.receipt as { verified?: boolean } | undefined)?.verified).toBe(true);
+    const finalEvent = events[events.length - 1];
+    expect(finalEvent?.event).toBe('final');
+    expect(finalEvent?.data.text).toBe("I'll remember that X");
+    expect(finalEvent?.data.timings).toMatchObject({ route: 'fast' });
+  });
+
+  it('says the model is unavailable for an open question when credentials are missing', async () => {
+    const create: ToolCreate = async () => {
+      throw new Error('Failed to resolve AWS credentials from the credential provider chain.');
+    };
+    setAlexaModel(create);
+    const response = await fetch(`${base}/api/alexa-sim/turn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ utterance: 'tell me a joke' }),
+    });
+    const events = parseSse(await response.text());
+    const error = events.find((event) => event.event === 'error');
+    expect(error?.data.message).toBe("My thinking model isn't connected on this server yet. Simple requests like remembering, tasks and your briefing still work.");
+    expect(String(error?.data.detail)).toMatch(/credentials/i);
+    expect(events.some((event) => event.event === 'final')).toBe(false);
   });
 });
