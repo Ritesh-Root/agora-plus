@@ -26,6 +26,11 @@ export function resetApprovals(): void {
   handlers.clear();
 }
 
+/** Drops waiting approvals and leaves the handlers registered. */
+export function clearPendingApprovals(): void {
+  approvals.clear();
+}
+
 export function registerApprovalHandler(kind: ApprovalKind, handler: ApprovalHandler): void {
   handlers.set(kind, handler);
 }

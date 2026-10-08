@@ -119,23 +119,24 @@ export async function removeMemory(id: string): Promise<MemoryEntry | null> {
   });
 }
 
-/** Readable list grouped by tag. A memory with several tags appears under each. */
+/** Readable list grouped by first tag. Each memory appears once; its other tags follow the text. */
 export async function memoryMarkdown(): Promise<string> {
   const entries = await listMemory();
   if (entries.length === 0) return '# Household memory\n\n_Nothing remembered yet._\n';
   const groups = new Map<string, MemoryEntry[]>();
   for (const entry of entries) {
-    const tags = entry.tags.length > 0 ? entry.tags : ['untagged'];
-    for (const tag of tags) {
-      const list = groups.get(tag) ?? [];
-      list.push(entry);
-      groups.set(tag, list);
-    }
+    const tag = entry.tags[0] ?? 'untagged';
+    const list = groups.get(tag) ?? [];
+    list.push(entry);
+    groups.set(tag, list);
   }
   const lines = ['# Household memory', ''];
   for (const tag of [...groups.keys()].sort((a, b) => a.localeCompare(b))) {
     lines.push(`## ${tag}`, '');
-    for (const entry of groups.get(tag) ?? []) lines.push(`- ${entry.text}`);
+    for (const entry of groups.get(tag) ?? []) {
+      const more = entry.tags.slice(1);
+      lines.push(`- ${entry.text}${more.length ? ` (${more.join(', ')})` : ''}`);
+    }
     lines.push('');
   }
   return lines.join('\n');

@@ -14,6 +14,7 @@ import {
   type MemoryEntry,
 } from './memoryStore';
 import { addTask as createTask, completeTask as finishTask, listTasks as readTasks } from './taskStore';
+import { toSpeech } from './speech';
 import { HOUSEHOLD_TEAM } from './team';
 
 export type { HouseholdSource };
@@ -172,6 +173,42 @@ async function briefingInput() {
 
 export async function dailyBriefing() {
   return buildBriefing(await briefingInput());
+}
+
+/**
+ * Phase 2: hold the goal for a yes. The preview is fixed text, not a model plan.
+ * Phase 3 fills the preview from planSociety before the same approval.
+ */
+export async function planAndRun(goal: string) {
+  const trimmed = goal.trim();
+  if (!trimmed) return { ok: false as const, error: 'A goal is required.' };
+  const preview = `Plan: ${clip(trimmed, 120)}. The household team starts only after you approve.`;
+  const approval = requestApproval('start_run', preview, { goal: trimmed });
+  return {
+    ok: true as const,
+    status: 'needs_approval' as const,
+    approvalId: approval.id,
+    summary: approval.summary,
+    preview,
+  };
+}
+
+/** Phase 2 answers from saved memory only. Phase 3 replaces this with the model tool loop. */
+export async function askAgora(question: string) {
+  const trimmed = question.trim();
+  if (!trimmed) return { ok: false as const, error: 'Ask a question about the household.' };
+  const memories = await searchMemory(trimmed);
+  const best = memories[0];
+  const speech = best
+    ? toSpeech(`I remember this: ${best.text}`)
+    : 'I do not have anything saved about that yet.';
+  return { ok: true as const, speech, memories: memories.slice(0, 5) };
+}
+
+/** Phase 2 stub. Phase 3 calls Firecrawl or Exa. This does not touch the network. */
+export async function webResearch(question: string) {
+  if (!question.trim()) return { ok: false as const, error: 'Ask a question to research.' };
+  return { ok: false as const, error: 'Web research is not configured yet.' };
 }
 
 export async function householdSnapshot() {

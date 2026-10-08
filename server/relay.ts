@@ -16,6 +16,7 @@ import { handleModelTest } from './modelTest';
 import { assertChatProxyTarget, MAX_PROXY_BODY } from './proxyGuard';
 import { getHub } from './hub';
 import { forwardSocietyEvent, startSocietyRun } from './runEngine';
+import { handleMcpRoutes } from './mcp/http';
 import { handleApiRoutes } from './routes';
 
 /**
@@ -149,7 +150,7 @@ export function relayPlugin(): Plugin {
     name: 'agora-relay',
     configureServer(server: ViteDevServer) {
       server.middlewares.use((req, res, next) => {
-        if (handleCorsProxy(req, res) || handleModelTest(req, res) || handleApiRoutes(req, res)) return;
+        if (handleCorsProxy(req, res) || handleModelTest(req, res) || handleApiRoutes(req, res) || handleMcpRoutes(req, res)) return;
         next();
       });
       if (!server.httpServer) {
