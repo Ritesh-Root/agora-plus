@@ -71,13 +71,20 @@ export const useTeamStore = create<TeamState>()(
     {
       name: 'team-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 2,
-      migrate: (state: any) => ({
-        ...state,
-        customSystems: Array.isArray(state?.customSystems)
+      version: 3,
+      migrate: (state: any, version: number) => {
+        const customSystems = Array.isArray(state?.customSystems)
           ? state.customSystems.map(normalizeSystem)
-          : [],
-      }),
+          : [];
+        let selectedAgentSetId = typeof state?.selectedAgentSetId === 'string'
+          ? state.selectedAgentSetId
+          : DEFAULT_AGENTIC_SET_ID;
+        // 'single-agent' was never a set id, so the office fell through to Creative Studio.
+        if (version < 3 && selectedAgentSetId === 'single-agent') {
+          selectedAgentSetId = DEFAULT_AGENTIC_SET_ID;
+        }
+        return { ...state, customSystems, selectedAgentSetId };
+      },
     }
   )
 );

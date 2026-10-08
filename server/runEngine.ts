@@ -27,11 +27,20 @@ export interface RunRecord {
   wordCount: number;
   /** Two spoken sentences for a finished household run. Room runs leave this unset. */
   spokenSummary?: string;
+  /** Set when the finished plan could not be saved. */
+  error?: string;
 }
 
 export type StartRunResult = { ok: true; runId: string } | { ok: false; error: string };
 
 const metas = new Map<string, { source: RunRecord['source']; startedAt: string }>();
+/** Finished records kept in memory when the file write failed. */
+const unsaved = new Map<string, RunRecord>();
+/** Run ids whose file must not be overwritten with a running snapshot. */
+const closing = new Set<string>();
+
+const HOUSEHOLD_BUSY = 'The team is still working on the last plan. Ask me for its status.';
+const SAVE_FAILED = 'The finished plan could not be saved.';
 
 function send(ws: WsSocket, msg: ServerMessage): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -105,6 +114,7 @@ export function forwardSocietyEvent(
     if (runId && room) room.noteStage(runId, 'repairing');
     deliver({ type: 'society-stage', stage: 'repairing' });
   }
+  if (tracked) touchRunning(tracked.runId);
 }
 
 function emit(requester: WsSocket | undefined, msg: ServerMessage): void {
@@ -176,11 +186,20 @@ async function householdSpokenSummary(
   }
 }
 
-async function persistFinished(
+type RunSnapshot = {
+  brief: string;
+  tasks: RunRecord['tasks'];
+  synthesis: string;
+  wordCount: number;
+  spokenSummary?: string;
+};
+
+function finishedRecord(
   runId: string,
   status: 'complete' | 'needs_revision' | 'stopped',
-  snapshot: { brief: string; tasks: RunRecord['tasks']; synthesis: string; wordCount: number; spokenSummary?: string },
-): Promise<void> {
+  snapshot: RunSnapshot,
+  error?: string,
+): RunRecord {
   const meta = metas.get(runId);
   const record: RunRecord = {
     id: runId,
@@ -194,19 +213,75 @@ async function persistFinished(
     wordCount: snapshot.wordCount,
   };
   if (snapshot.spokenSummary) record.spokenSummary = snapshot.spokenSummary;
-  await writeText(`runs/${runId}.md`, snapshot.synthesis);
-  await writeJson(`runs/${runId}.json`, record);
+  if (error) record.error = error;
+  return record;
 }
 
-async function saveQuietly(
+function runningRecord(runId: string, brief: string): RunRecord {
+  const meta = metas.get(runId);
+  const current = getHub().room.currentRun();
+  const live = current && current.id === runId ? current : null;
+  return {
+    id: runId,
+    brief: live?.brief || brief,
+    source: meta?.source ?? 'household',
+    status: 'running',
+    startedAt: meta?.startedAt ?? new Date().toISOString(),
+    tasks: live ? live.tasks.map((task) => ({ id: task.id, title: task.title, role: task.role, status: task.status })) : [],
+    synthesis: live?.synthesis ?? '',
+    wordCount: live?.wordCount ?? 0,
+  };
+}
+
+/** Household runs keep a file from the start so status can see tasks so far. */
+function touchRunning(runId: string): void {
+  if (closing.has(runId)) return;
+  const meta = metas.get(runId);
+  if (meta?.source !== 'household') return;
+  const current = getHub().room.currentRun();
+  if (!current || current.id !== runId) return;
+  const record = runningRecord(runId, current.brief);
+  void writeJson(`runs/${runId}.json`, record).catch((error) => {
+    console.error('[run] could not update the running plan:', error instanceof Error ? error.message : error);
+  });
+}
+
+async function writeRunning(runId: string, brief: string): Promise<void> {
+  if (closing.has(runId)) return;
+  await writeJson(`runs/${runId}.json`, runningRecord(runId, brief));
+}
+
+async function persistFinished(
   runId: string,
   status: 'complete' | 'needs_revision' | 'stopped',
-  snapshot: { brief: string; tasks: RunRecord['tasks']; synthesis: string; wordCount: number; spokenSummary?: string },
+  snapshot: RunSnapshot,
 ): Promise<void> {
+  await writeText(`runs/${runId}.md`, snapshot.synthesis);
+  await writeJson(`runs/${runId}.json`, finishedRecord(runId, status, snapshot));
+}
+
+/** Returns a spoken error when the file could not be written. The run still keeps that error. */
+async function saveFinished(
+  runId: string,
+  status: 'complete' | 'needs_revision' | 'stopped',
+  snapshot: RunSnapshot,
+): Promise<string | null> {
+  closing.add(runId);
   try {
     await persistFinished(runId, status, snapshot);
+    unsaved.delete(runId);
+    return null;
   } catch (error) {
     console.error('[run] could not save the run:', error instanceof Error ? error.message : error);
+    const visible = status === 'complete' ? 'needs_revision' : status;
+    const failed = finishedRecord(runId, visible, snapshot, SAVE_FAILED);
+    unsaved.set(runId, failed);
+    try {
+      await writeJson(`runs/${runId}.json`, failed);
+    } catch {
+      // The in-memory record is what status and the office can still show.
+    }
+    return SAVE_FAILED;
   }
 }
 
@@ -240,6 +315,8 @@ export async function getRunRecord(runId: string): Promise<RunRecord | null> {
       wordCount: current.wordCount ?? 0,
     };
   }
+  const held = unsaved.get(runId);
+  if (held) return held;
   try {
     return await readJson<RunRecord | null>(`runs/${runId}.json`, null);
   } catch {
@@ -255,18 +332,23 @@ export async function listRecentRuns(n: number): Promise<RunRecord[]> {
   } catch {
     return [];
   }
-  const records: RunRecord[] = [];
+  const records = new Map<string, RunRecord>();
   for (const name of names) {
     if (!RUN_FILE.test(name)) continue;
     try {
       const record = await readJson<RunRecord | null>(`runs/${name}`, null);
-      if (record && typeof record.id === 'string') records.push(record);
+      if (record && typeof record.id === 'string') records.set(record.id, unsaved.get(record.id) ?? record);
     } catch {
       // Skip a file that is not a run record.
     }
   }
-  records.sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''));
-  return records.slice(0, n);
+  for (const [id, record] of unsaved) {
+    if (!records.has(id)) records.set(id, record);
+  }
+  const newest = [...records.values()];
+  const stamp = (record: RunRecord) => record.startedAt || record.finishedAt || '';
+  newest.sort((a, b) => stamp(b).localeCompare(stamp(a)) || (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''));
+  return newest.slice(0, n);
 }
 
 /**
@@ -285,10 +367,24 @@ export async function startSocietyRun(input: {
 }): Promise<StartRunResult> {
   const { room } = getHub();
   const begun = room.beginRun(input.brief);
-  if (!begun.ok) return { ok: false, error: 'A run is already in progress.' };
+  if (!begun.ok) {
+    return {
+      ok: false,
+      error: input.source === 'household'
+        ? HOUSEHOLD_BUSY
+        : 'A run is already in progress.',
+    };
+  }
   const runId = begun.run.id;
   const requester = input.requester;
   metas.set(runId, { source: input.source, startedAt: new Date().toISOString() });
+  if (input.source === 'household') {
+    try {
+      await writeRunning(runId, input.brief);
+    } catch (error) {
+      console.error('[run] could not save the running plan:', error instanceof Error ? error.message : error);
+    }
+  }
 
   const deliver = (message: ServerMessage): void => {
     if (!room.ownsRun(runId)) return;
@@ -374,24 +470,36 @@ export async function startSocietyRun(input: {
       }
     },
   }).then(async (result) => {
+    closing.add(runId);
     if (!room.ownsRun(runId)) return;
+    const taskRows = result.tasks.map((task) => ({ id: task.id, title: task.title, role: task.role, status: task.status }));
     if (result.documentStatus === 'stopped') {
       room.markStopped(runId);
       deliver({ type: 'society-run-status', runId, status: 'stopped' });
       endRunStats();
       clearBoss();
       const spokenSummary = await householdSpokenSummary(input.source, provider, result.synthesis, result.tasks);
-      await saveQuietly(runId, 'stopped', {
+      const saveError = await saveFinished(runId, 'stopped', {
         brief: result.brief,
-        tasks: result.tasks.map((task) => ({ id: task.id, title: task.title, role: task.role, status: task.status })),
+        tasks: taskRows,
         synthesis: result.synthesis,
         wordCount: result.wordCount,
         spokenSummary,
       });
+      if (saveError) deliver({ type: 'society-error', error: saveError });
       return;
     }
+    const spokenSummary = await householdSpokenSummary(input.source, provider, result.synthesis, result.tasks);
+    const intended = result.revisionLabel ? 'needs_revision' as const : 'complete' as const;
+    const saveError = await saveFinished(runId, intended, {
+      brief: result.brief,
+      tasks: taskRows,
+      synthesis: result.synthesis,
+      wordCount: result.wordCount,
+      spokenSummary,
+    });
     const recorded = room.finishRun(runId, {
-      status: result.revisionLabel ? 'needs_revision' : 'complete',
+      status: saveError ? 'needs_revision' : intended,
       synthesis: result.synthesis,
       wordCount: result.wordCount,
       revisionLabel: result.revisionLabel,
@@ -401,7 +509,6 @@ export async function startSocietyRun(input: {
       clearBoss();
       return;
     }
-    const spokenSummary = await householdSpokenSummary(input.source, provider, result.synthesis, result.tasks);
     const counted = provider.takeUsage();
     deliver({
       type: 'society-complete',
@@ -419,6 +526,8 @@ export async function startSocietyRun(input: {
         synthesis: result.synthesis,
         wordCount: result.wordCount,
         revisionLabel: result.revisionLabel,
+        ...(spokenSummary ? { spokenSummary } : {}),
+        ...(saveError ? { error: saveError } : {}),
         negotiation: negotiationRes,
         metrics: {
           ...result.metrics,
@@ -444,14 +553,8 @@ export async function startSocietyRun(input: {
     });
     endRunStats();
     clearBoss();
-    await saveQuietly(runId, result.revisionLabel ? 'needs_revision' : 'complete', {
-      brief: result.brief,
-      tasks: result.tasks.map((task) => ({ id: task.id, title: task.title, role: task.role, status: task.status })),
-      synthesis: result.synthesis,
-      wordCount: result.wordCount,
-      spokenSummary,
-    });
   }).catch(async (err) => {
+    closing.add(runId);
     endRunStats();
     clearBoss();
     if (room.ownsRun(runId)) {
@@ -460,7 +563,8 @@ export async function startSocietyRun(input: {
       deliver({ type: 'society-error', error: publicModelError(err) });
       const snapshot = roomSnapshot(runId, input.brief);
       const spokenSummary = await householdSpokenSummary(input.source, provider, snapshot.synthesis, snapshot.tasks);
-      await saveQuietly(runId, 'stopped', { ...snapshot, spokenSummary });
+      const saveError = await saveFinished(runId, 'stopped', { ...snapshot, spokenSummary });
+      if (saveError) deliver({ type: 'society-error', error: saveError });
     }
   });
 

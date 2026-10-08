@@ -114,6 +114,18 @@ export const SocietyPanel: React.FC = () => {
             )}
           </div>
 
+          {result?.spokenSummary?.trim() && (
+            <div
+              className="p-4 rounded-2xl border border-amber-300 bg-amber-50 shadow-sm"
+              data-testid="spoken-summary"
+            >
+              <span className="text-[9px] font-black uppercase tracking-widest text-amber-800 block">
+                {/allerg|conflict/i.test(result.spokenSummary) ? 'Keeper says' : 'Spoken summary'}
+              </span>
+              <p className="text-sm font-semibold text-ink leading-relaxed mt-1">{result.spokenSummary}</p>
+            </div>
+          )}
+
           {/* Error Banner */}
           {error && (
             <div className="p-4 bg-red-50/50 border border-red-100 rounded-2xl flex items-start gap-2.5">
