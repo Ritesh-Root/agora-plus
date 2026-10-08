@@ -1,6 +1,6 @@
 # AGORA+ MCP tools
 
-Taken from `server/mcp/server.ts`. The server name is `agora-plus`, version `0.1.0`. Protocol `2025-11-25`. Every tool returns `content` (text, the spoken line) and `structuredContent` (the fields below). A failure also sets `isError: true` and `status: "error"`.
+Taken from `server/mcp/server.ts`. The server name is `agora-plus`, version `0.1.0`. The negotiated protocol is `2025-11-25` or newer. Alexa's published client sample sends `2025-03-26`. The specification index on 8 Oct 2026 names `2026-07-28`. Eleven tools are always registered. `web_research` is registered only when `FIRECRAWL_API_KEY` or `EXA_API_KEY` is set. Every tool returns `content` (text, the spoken line) and `structuredContent` (the fields below). A failure also sets `isError: true` and `status: "error"`. `daily_briefing` and `list_tasks` also set `_meta.ui.resourceUri` to the household card.
 
 ## Shared output
 
@@ -25,12 +25,13 @@ Input:
 | --- | --- | --- | --- |
 | `fact` | string | yes | The fact to keep, in the words the person used. |
 | `tags` | string[] | no | Optional labels such as allergy or preference. |
+| `who` | string | no | The person this fact is about. A leading capitalised name is stored when this is omitted. |
 
-Output: `speech`, `status`, `receipt`.
+Output: `speech`, `status`, `receipt`. `who` is on the saved memory when one was stored. The same text, after trim, collapsed space, and case folding, updates the existing row.
 
 ## recall
 
-Call when someone asks what the household already knows. It returns the closest saved facts and the spoken reply names the best match. An empty query returns the newest facts. It does not change anything.
+Call when someone asks what the household already knows. It returns the closest saved facts. A tie speaks both matches. A partial overlap says "I'm not sure, but I have: ...". An empty query returns the newest facts. It does not change anything.
 
 Input:
 
@@ -45,6 +46,7 @@ Output: `speech`, `status`, and `memories` (up to five).
 | `id` | string |
 | `text` | string |
 | `tags` | string[] |
+| `who` | string, only when the fact names a person |
 
 ## forget
 
@@ -70,9 +72,12 @@ Input:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `title` | string | yes | What needs doing, as a short title. |
-| `due` | string | no | Optional due time, ideally `YYYY-MM-DD`. |
+| `due` | string | no | Optional free-text due, such as "today" or "at 6pm". |
+| `who` | string | no | The person who owns the task. |
+| `list` | string | no | Named list such as `shopping`. Omit it for the main to-do list. |
+| `dueAt` | string | no | ISO 8601 reminder time with a numeric offset. An open task whose `dueAt` is already past is due. |
 
-Output: `speech`, `status`, `receipt`.
+Output: `speech`, `status`, `receipt`. "today" and "due today" use `AGORA_TIMEZONE`, or the server zone when that is unset.
 
 ## list_tasks
 
@@ -83,8 +88,9 @@ Input:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `status` | `open` \| `done` | no | Filter. Leave empty for both. |
+| `list` | string | no | `shopping` for that list, `main` for the to-do list. Leave empty for every list. |
 
-Output: `speech`, `status`, and `tasks`.
+Output: `speech`, `status`, and `tasks`. A list of only finished tasks says there are no open tasks. The shopping list says "On the shopping list: ..." or "The shopping list is empty."
 
 | `tasks[]` | Type |
 | --- | --- |
@@ -92,6 +98,9 @@ Output: `speech`, `status`, and `tasks`.
 | `title` | string |
 | `status` | `open` \| `done` |
 | `due` | string, only when the task has one |
+| `who` | string, only when the task has an owner |
+| `list` | string, only when the task is on a named list |
+| `dueAt` | string, only when the task has a reminder time |
 
 ## complete_task
 
@@ -107,7 +116,7 @@ Output: `speech`, `status`, `receipt`.
 
 ## daily_briefing
 
-Call for the morning household briefing. It is built from due tasks, waiting approvals, and recent runs. It does not call a model.
+Call for the morning household briefing. It is built from saved memory (allergies and medicine first), due reminders, open tasks, waiting approvals, and recent runs. It does not call a model. With a saved peanut fact the spoken line includes "Remember: Mia is allergic to peanuts." An overdue reminder is "Reminder: &lt;title&gt;."
 
 Input: none.
 
@@ -115,7 +124,7 @@ Output: `speech`, `status`, `items` (string[], the briefing lines), `suggestions
 
 ## plan_and_run
 
-Call when someone wants the household team to plan a goal, such as a week of meals. It does not start the team. It returns `needs_approval`, an `approvalId`, and a `preview` that lists the planned steps. Call `approve_action` before anything runs.
+Call when someone wants the household team to plan a goal, such as a week of meals. It does not start the team. It returns `needs_approval`, an `approvalId`, and a `preview` that lists the planned steps. Call `approve_action` before anything runs. An order, a purchase, a booking, a payment, or a phone call is refused, with no `approvalId`. If the preview throws or returns no steps, the speech is "Planning is unavailable right now." and there is no approval. Approving a plan runs only the saved step list.
 
 Input:
 
@@ -148,7 +157,7 @@ Input:
 | `approvalId` | string | yes | The `approvalId` from the tool that asked for a yes. |
 | `decision` | `approve` \| `reject` | yes | `approve` to do it, `reject` to leave it. |
 
-Output: `speech`, `status`. A finished forget includes `receipt`. An approved plan includes `runId` for `get_run_status`.
+Output: `speech`, `status`. A finished forget includes `receipt`. An approved plan includes `runId` for `get_run_status`. A busy room or a handler error leaves the approval pending. Say so and let the person retry. On the voice simulator the model cannot call this tool. A person uses an exact yes or no, or a button. External clients, including an Alexa+ add-on, still call it.
 
 ## ask_agora
 
@@ -160,11 +169,11 @@ Input:
 | --- | --- | --- | --- |
 | `question` | string | yes | The question, in everyday words. |
 
-Output: `speech`, `status`, `memories` (same shape as `recall`).
+Output: `speech`, `status`, `memories` (`id`, `text`, `tags` only). `who` is omitted because this output schema rejects extra properties. About 4 seconds for an Alexa client, 9 seconds when the client name is `agora-plus-voice`. A missing model or a timeout names the top saved fact and does not use the two-fact recall sentence.
 
 ## web_research
 
-Call when a household question needs the public web, such as a current price. It returns a short answer and names the source. If web research is not set up, it says so and does not invent sources.
+Call when a household question needs the public web, such as a current price. It returns a short answer and names the source. The tool is not registered when neither `FIRECRAWL_API_KEY` nor `EXA_API_KEY` is set. It does not invent sources.
 
 Input:
 
@@ -172,13 +181,13 @@ Input:
 | --- | --- | --- | --- |
 | `question` | string | yes | What to look up on the web. |
 
-Output: `speech`, `status`.
+Output: `speech`, `status`, and `sources` (`title`, `url`) when pages were used. The spoken line does not read the URL.
 
 ## Resources
 
 | URI | Name | MIME | What it is |
 | --- | --- | --- | --- |
-| `agora://memory` | `memory` | `text/markdown` | Facts the household has asked AGORA+ to remember, grouped by tag. |
+| `agora://memory` | `memory` | `text/markdown` | Facts the household has asked AGORA+ to remember, grouped by tag. A fact names the person when `who` is set. |
 | `agora://tasks` | `tasks` | `application/json` | Open and finished household tasks. |
 | `agora://runs/{runId}/document` | `run-document` | `text/markdown` | The written result of one household run. `runId` is a UUID. A missing run is not found. |
 

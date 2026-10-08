@@ -21,29 +21,31 @@ Model ids keep the `anthropic.` prefix:
 Who calls it:
 
 - The tool loop, [server/llm/toolLoop.ts](../server/llm/toolLoop.ts). History is append-only. The system prompt and the tool list stay fixed. Parallel tool results go back in one user message. The default cap is 4 steps (`maxSteps ?? 4`).
-- `ask_agora` in [server/household/actions.ts](../server/household/actions.ts), on the fast model, with a 9 second timeout. Memory is in the user turn.
+- `ask_agora` in [server/household/actions.ts](../server/household/actions.ts), on the fast model. About 4 seconds for Alexa, 9 seconds for the voice simulator client. Memory is in the user turn.
 - `planSociety` in [server/society/Orchestrator.ts](../server/society/Orchestrator.ts), one Messages call that returns the step list.
 - `runSociety` in the same file, after approval: workers, an optional debate, the lead's merge, and up to two repair calls when the brief asks for them.
 - The spoken summary in [server/runEngine.ts](../server/runEngine.ts), one fast-model call after a household run finishes.
 
 The office uses this provider when the browser did not send a key and `AGORA_SERVER_LLM=bedrock` ([server/relay.ts](../server/relay.ts), [server/routingProvider.ts](../server/routingProvider.ts)).
 
-IAM: `bedrock-mantle:CreateInference` on `arn:aws:bedrock-mantle:*:*:project/*`. The policy is below. A live `messages.create` was not recorded. `aws sts get-caller-identity` in the phase 3 shell returned `NoCredentials` ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)). Latency for a real Bedrock turn is `TODO(measure)`.
+The client is created with a 90 second timeout and one retry. Preview and spoken-summary stages use 20 seconds and no retries. Worker, debate, assemble, and repair stages use 90 seconds and one retry ([server/llm/bedrockProvider.ts](../server/llm/bedrockProvider.ts)). A 429 or throttle is "The model is busy right now. Try again in a moment."
+
+IAM: `bedrock-mantle:CreateInference` on `arn:aws:bedrock-mantle:*:*:project/*`. The policy is below. A live `messages.create` was not recorded. `aws sts get-caller-identity` in the phase 3 shell returned `NoCredentials` ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)). Bedrock and Polly run only when AWS credentials are present. Latency for a real Bedrock turn, and time to first audio, are `TODO(measure)`.
 
 ## Calls per voice turn
 
 Acknowledgement text is chosen in [server/alexaSim/ack.ts](../server/alexaSim/ack.ts) before any model call. That is zero Bedrock calls.
 
-Fast path, the default ([server/alexaSim/fastPath.ts](../server/alexaSim/fastPath.ts)): remember, recall-style saves, the briefing, task add/list/done, a plan request, and yes/no while an approval is waiting. The bridge calls MCP and does not call Bedrock for the routing. `daily_briefing` is fixed logic, still zero model calls. `remember`, `add_task`, `list_tasks`, and `complete_task` do not call a model either.
+Fast path, the default ([server/alexaSim/fastPath.ts](../server/alexaSim/fastPath.ts)): remember, recall, the briefing, task add/list/done, the shopping list, a reminder with `dueAt`, a plan request, and an exact yes or no while an approval is waiting. The bridge calls MCP and does not call Bedrock for the routing. The voice model is not given `approve_action`. `daily_briefing` is fixed logic, still zero model calls. `remember`, `recall`, `add_task`, `list_tasks`, and `complete_task` do not call a model either.
 
-`plan_and_run` on that path does call Bedrock once, inside the tool: `planSociety` is one `generateCompletion` so the approval can show the steps. The swarm does not start until `approve_action`. If that preview throws, the approval still appears and the step list is empty ([server/household/actions.ts](../server/household/actions.ts)).
+`plan_and_run` on that path calls Bedrock once, inside the tool, when the goal is something this household can plan: `planSociety` is one `generateCompletion` so the approval can show the steps. The swarm does not start until a person approves. If that preview throws or returns no steps, the tool says planning is unavailable and does not create an approval ([server/household/actions.ts](../server/household/actions.ts)). An order, a purchase, a booking, a payment, or a phone call is refused with no Bedrock call and no approval id.
 
 Model path (`ALEXA_SIM_FAST_PATH=0`, or an utterance the fast path does not claim): `runToolLoop` makes one Messages call per step, and stops when `stop_reason` is not `tool_use`, at most 4. The voice model is `ALEXA_SIM_MODEL`, else `BEDROCK_FAST_MODEL`, else `anthropic.claude-haiku-4-5` ([server/alexaSim/oauthClient.ts](../server/alexaSim/oauthClient.ts)). Each tool the model calls can add the calls in the next paragraph.
 
 | Tool the voice model calls | Extra Bedrock calls |
 |---|---|
 | `remember`, `recall`, `forget`, `add_task`, `list_tasks`, `complete_task`, `daily_briefing`, `get_run_status`, `approve_action` | 0 |
-| `ask_agora` | Up to 4 on the fast model, or fewer if the loop ends, or 0 if the model is missing or the 9 second timeout fires (the reply falls back to saved memory) |
+| `ask_agora` | Up to 4 on the fast model, or fewer if the loop ends, or 0 if the model is missing or the timeout fires (about 4 seconds for an Alexa client, 9 seconds when the MCP client name is `agora-plus-voice`). The reply falls back to the top saved fact. |
 | `web_research` | 1 fast-model completion when Firecrawl or Exa is configured and the search returned text. 0 when research is not configured |
 | `plan_and_run` | 1 planning call for the preview |
 
