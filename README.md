@@ -1,30 +1,35 @@
 # AGORA+
 
-AGORA+ — a household brain one step ahead of Alexa: it plans, asks before acting, shows a receipt, and remembers — and the same brain works from Alexa+, Claude and ChatGPT over MCP.
+Household memory is a file on a server you run. Every write returns a receipt whose `verified` flag is a second read of that file. Nothing with side effects starts until a person says yes, and that wait is in the tool result, not only in a prompt.
 
-It is the AGORA office plus a household layer added for the Amazon Developer Hackathon (Alexa+ track). The office still draws the session in 3D. The new surface is a voice page, an MCP server, and files on disk.
+The surfaces that were run for this entry are the unofficial voice page at `/alexa` and the MCP server at `/mcp`, used from Claude Code with `AGORA_MCP_TOKEN`. MCP clients such as Alexa+ add-ons, Claude, and ChatGPT can connect to that same server. ChatGPT was not run against it, and a live Alexa+ add-on was not deployed. The add-on package in [alexa-addon/addon.json](alexa-addon/addon.json) is still a template: every URL contains `<host>`.
+
+It is the AGORA office plus a household layer added for the Amazon Developer Hackathon (Alexa+ track). The office still draws the session in 3D. The household cast there is Agora, Scout, Planner, and Keeper. The new surface is the voice page, the MCP server, and files on disk.
 
 ![Voice simulator on a desktop](docs/images/alexa-sim-desktop.png)
 
 ## Why
 
-Four complaints from the 8 Oct 2026 research pass. Quotes and the source list are in [docs/research/alexa-plus-voice-of-customer.md](docs/research/alexa-plus-voice-of-customer.md) and [docs/research/sources.json](docs/research/sources.json).
+Other assistants already advertise family memory, shopping lists, and device control. Claude can already see devices through other connectors. This server keeps household facts on the machine you run, and a plan does not start until a person says yes. Lights, locks, calendars, and countdown timers are not in this build.
 
-- **Jobs stop halfway.** Spyglass, Wired, The Verge, David Pogue, and six Reddit threads describe routines and multi-step tasks that do not finish. Wired (6 Mar 2026): "It maneuvers like an unpredictable toddler smashing around and half-completing tasks." AGORA+ shows the steps, waits for a yes, then returns a receipt whose `verified` flag is a read-back from disk.
-- **Replies take too long.** Spyglass (30 Sep 2025): "Alexa Plus is noticeably slower, with some requests taking up to 15 seconds for a response." The voice page speaks a fixed acknowledgement before any model call and shows the gap on a latency meter.
-- **A stored fact disappears.** Consumer Reports (19 Dec 2025) saved a recipe that Alexa+ recalled at first and did not have two weeks later. `remember`, `recall`, and `forget` are backed by the MCP resource `agora://memory`, which you can open and edit.
-- **People want a checkpoint.** Stack Overflow (27 May 2026, 1,100 technologists): "63% of technologists still rarely or never let agents run entirely on autopilot," and 60% block unapproved system changes. `forget` and `plan_and_run` return `needs_approval` until `approve_action`.
+Four complaints from the 8 Oct 2026 research pass. Quotes and the source list are in [docs/research/alexa-plus-voice-of-customer.md](docs/research/alexa-plus-voice-of-customer.md) and [docs/research/sources.json](docs/research/sources.json). The demo paraphrases these. It does not put the article sentences on screen.
+
+- **Jobs stop halfway.** Reviews and forum posts describe routines and multi-step tasks that do not finish. Wired (6 Mar 2026) describes half-completed tasks. AGORA+ shows the steps and waits for a yes before the team starts. The receipt on a write is a separate thing: `verified` is a read-back from disk.
+- **Replies take too long.** Spyglass (30 Sep 2025): "Alexa Plus is noticeably slower, with some requests taking up to 15 seconds for a response." The Verge (8 Oct 2026) says timers and weather execute in three to five seconds ([review](https://www.theverge.com/tech/1007565/amazon-alexa-plus-review-one-year-echo-show-dot-max)). The voice page cites both and labels its meter time to first audio on the fast path. That AGORA+ number is `TODO(measure)`. A turn that never starts audio reads "text only".
+- **A stored fact disappears.** Consumer Reports (19 Dec 2025) saved a recipe that Alexa+ recalled at first and did not have two weeks later. `remember`, `recall`, and `forget` are backed by `memory.json` and the MCP resource `agora://memory`. A fact can name a person (`who`). The Household panel can edit it.
+- **People want a checkpoint.** Stack Overflow (27 May 2026, 1,100 technologists): "63% of technologists still rarely or never let agents run entirely on autopilot," and 60% block unapproved system changes. `forget` and `plan_and_run` return `needs_approval`. Remembering a fact and adding a task do not wait. On `/alexa` the model cannot call `approve_action`. A person says an exact yes or no, or uses a button. `approve_action` stays an MCP tool for external clients.
 
 ## What it does
 
-- **Voice simulator** at `/alexa`. Unofficial simulated Alexa+ experience. Type, or hold to talk. Remember, the briefing, tasks, and yes/no are routed with no model call ([server/alexaSim/fastPath.ts](server/alexaSim/fastPath.ts)). A plan still asks Bedrock once for the step list. The page shows an "Under the hood" trace of each MCP `tools/call`.
-- **MCP server** at `/mcp`. Twelve tools, three resources (`agora://memory`, `agora://tasks`, `agora://runs/{id}/document`), two prompts (`morning-briefing`, `plan-a-week-of-meals`). Protocol 2025-11-25, Streamable HTTP, OAuth for Alexa+ ([server/mcp/server.ts](server/mcp/server.ts), [server/mcp/oauth.ts](server/mcp/oauth.ts)). A screen card at `ui://daily_briefing/household-card.html` is there for hosts that support MCP Apps.
+- **Voice simulator** at `/alexa`. Unofficial simulated Alexa+ experience. This is the page to open first. Type, or hold to talk. Remember, recall ("What is Mia allergic to?"), the briefing, the shopping list, reminders, and an exact yes or no are routed with no model call ([server/alexaSim/fastPath.ts](server/alexaSim/fastPath.ts)). A plan still asks Bedrock once for the step list, and only after that preview returns steps does the page wait for a yes. Orders, purchases, bookings, payments, and phone calls are refused, with no approval id. The page shows an "Under the hood" trace of each MCP `tools/call`. While it is open it polls `GET /api/household` about every 30 seconds and speaks "Reminder: &lt;title&gt;." once per due task per page load.
+- **MCP server** at `/mcp`. Eleven tools always, and `web_research` as a twelfth when `FIRECRAWL_API_KEY` or `EXA_API_KEY` is set. Three resources (`agora://memory`, `agora://tasks`, `agora://runs/{id}/document`) and two prompts (`morning-briefing`, `plan-a-week-of-meals`). Streamable HTTP. The server negotiates protocol 2025-11-25 and newer ([server/mcp/mcp.test.ts](server/mcp/mcp.test.ts)). Alexa's published client sample sends `2025-03-26`. The specification index on 8 Oct 2026 names 2026-07-28 as current ([docs/council/reports/g4-spec-followup.md](docs/council/reports/g4-spec-followup.md)). OAuth is in [server/mcp/oauth.ts](server/mcp/oauth.ts). `daily_briefing` and `list_tasks` put the MCP Apps card on the tool result as well as the tool definition (`ui://daily_briefing/household-card.html`).
+- **People, lists, and reminders.** A fact can store `who` (a leading name such as "Mia is allergic to peanuts" is enough). A task can store `who`, `list` (`shopping` is its own list; absent means the main to-do list), and `dueAt` (ISO 8601 with a numeric offset). The free-text `due` stays. The briefing speaks one memory line, allergies and medicine first ("Remember: Mia is allergic to peanuts."). Recall says both facts when they tie.
 - **Agent Skill** [skills/agora-household/SKILL.md](skills/agora-household/SKILL.md). How to connect, which tool to call, and the rule that a `needs_approval` result waits for a person.
-- **Household team** on Amazon Bedrock: Agora, Scout, Planner, and Keeper ([server/household/team.ts](server/household/team.ts)). Keeper checks plans against memory. Claude is called through the Messages endpoint ([server/llm/bedrockProvider.ts](server/llm/bedrockProvider.ts)).
-- **Polly** speaks ([server/alexaSim/tts.ts](server/alexaSim/tts.ts)). The browser voice speaks when Polly returns 503.
-- **Approvals and receipts.** Side effects from MCP wait. Every write can show `{ action, id, verified, at }`.
-- **3D office** at `/`. The same swarm animates there over the WebSocket while the run is going.
-- **Alexa+ add-on package** in [alexa-addon/addon.json](alexa-addon/addon.json), plus [public/privacy.html](public/privacy.html) and [public/terms.html](public/terms.html). The manifest lists the United States only. `alexa-ai` was not deployed from this workspace.
+- **Household team** on Amazon Bedrock, only when `AGORA_SERVER_LLM=bedrock` and AWS credentials are present: Agora, Scout, Planner, and Keeper ([server/household/team.ts](server/household/team.ts)). That set is the office default. Keeper checks plans against memory. Claude is called through the Messages endpoint ([server/llm/bedrockProvider.ts](server/llm/bedrockProvider.ts)). A live Bedrock call was not recorded in this workspace.
+- **Polly** speaks when AWS credentials are present ([server/alexaSim/tts.ts](server/alexaSim/tts.ts)). The browser voice speaks when Polly returns 503. A successful Polly synthesize was not recorded. Time to first audio is `TODO(measure)`.
+- **Approvals and receipts.** `forget` and `plan_and_run` wait. Remembering and adding a task do not. Every write can show `{ action, id, verified, at }`. `verified` is a follow-up read. A failed yes leaves the approval pending so it can be retried. Waiting approvals still live in the process and expire after ten minutes.
+- **3D office** at `/`. The Household cast is the roster. A household run is written to `runs/<id>.json` with `status: "running"` when it starts, and again when it ends. The Society panel shows `spokenSummary` when the run has one.
+- **Alexa+ add-on package** in [alexa-addon/addon.json](alexa-addon/addon.json), plus [public/privacy.html](public/privacy.html) and [public/terms.html](public/terms.html). Account linking is enabled in the file (authorization code, PKCE S256). The manifest lists the United States only, and every URL is still `https://<host>/...`. `alexa-ai` was not deployed from this workspace.
 
 The file map is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -56,28 +61,48 @@ npm ci
 cp .env.example .env
 ```
 
-Minimum for a model, in `.env` (values only, never commit the file):
+The voice page, remember, the briefing, the shopping list, and recall do not need AWS. Bedrock and Polly run only when AWS credentials are on the standard chain (`aws login`, a profile, or a task role). For that path, in `.env` (values only, never commit the file):
 
 ```bash
 AGORA_SERVER_LLM=bedrock
 AWS_REGION=us-east-1
 ```
 
-AWS credentials come from the standard chain (`aws login`, a profile, or a task role). Bedrock defaults are `anthropic.claude-sonnet-5` and `anthropic.claude-haiku-4-5`. Override with `BEDROCK_MODEL` and `BEDROCK_FAST_MODEL` if you need to.
+Bedrock defaults are `anthropic.claude-sonnet-5` and `anthropic.claude-haiku-4-5`. Override with `BEDROCK_MODEL` and `BEDROCK_FAST_MODEL` if you need to.
 
-Minimum for MCP clients (Inspector, Claude Code):
+Claude Code needs a development token of at least 32 characters. A shorter value is ignored.
 
 ```bash
-AGORA_MCP_TOKEN=choose-a-long-random-string
+AGORA_MCP_TOKEN=choose-at-least-32-random-characters
 ```
 
-OAuth for Alexa+ also needs `AGORA_OAUTH_CLIENT_ID`, `AGORA_OAUTH_CLIENT_SECRET`, `AGORA_TOKEN_SECRET`, and `AGORA_HOUSEHOLD_PASSCODE`. If those are empty, the OAuth routes return 503 and the development token is the one that can call tools. The full list is [.env.example](.env.example).
+OAuth also needs `AGORA_OAUTH_CLIENT_ID`, `AGORA_OAUTH_CLIENT_SECRET`, and `AGORA_TOKEN_SECRET` (at least 32 characters). A public process also needs `AGORA_PUBLIC_URL` and `AGORA_HOUSEHOLD_PASSCODE`. If the OAuth secrets are empty, those routes return 503 and the development token is the one that can call tools. The token is ignored when `NODE_ENV=production` or `AGORA_PUBLIC_URL` is https, unless `AGORA_ALLOW_DEV_TOKEN=1`.
 
 ```bash
 npm run dev
 ```
 
-`npm run dev` starts Vite on port 3000 and binds `0.0.0.0`, with the room relay and `/mcp`. Open [http://localhost:3000/](http://localhost:3000/) for the office and [http://localhost:3000/alexa](http://localhost:3000/alexa) for the voice page.
+`npm run dev` starts Vite on port 3000 and binds `127.0.0.1`, with the room relay and `/mcp`. Open [http://127.0.0.1:3000/alexa](http://127.0.0.1:3000/alexa) first. The office is [http://127.0.0.1:3000/](http://127.0.0.1:3000/). `npm run dev:lan` binds `0.0.0.0`. On that bind, `/mcp` and OAuth return 503 until `AGORA_PUBLIC_URL` is set, and household routes from another machine return 403 until `AGORA_HOUSEHOLD_PASSCODE` is set.
+
+### Environment
+
+Names the server reads. Empty in [.env.example](.env.example) means unset. The full table, including office and deploy names, is [docs/DEPLOY.md](docs/DEPLOY.md). Do not commit real values.
+
+| Variable | What it does |
+| --- | --- |
+| `AGORA_HOUSEHOLD_PASSCODE` | When set, household HTTP routes need the `agora_household` cookie. Production listens on `0.0.0.0` only when this is set. Five wrong guesses, then 15 minutes and HTTP 429. |
+| `AGORA_MCP_TOKEN` | Development bearer for Claude Code and the Inspector. At least 32 characters. Ignored in production or behind an https public URL unless `AGORA_ALLOW_DEV_TOKEN=1`. |
+| `AGORA_ALLOW_DEV_TOKEN` | Set to `1` to keep the development token in those cases. |
+| `AGORA_TOKEN_SECRET` | HMAC secret for access and refresh tokens. OAuth stays off when it is shorter than 32 characters. |
+| `AGORA_OAUTH_CLIENT_ID` | OAuth client id. |
+| `AGORA_OAUTH_CLIENT_SECRET` | OAuth client secret. HTTP Basic or the form body, never both. |
+| `AGORA_OAUTH_REDIRECT_URIS` | Comma-separated exact `redirect_uri` values. The simulator's own `http://127.0.0.1`, `http://localhost`, and `::1` callbacks are always allowed. |
+| `AGORA_PUBLIC_URL` | Public HTTPS origin, no path. Required before OAuth or `/mcp` will answer on a process that is not bound to loopback. |
+| `AGORA_TRUST_PROXY` | Set to `1` before `X-Forwarded-Proto` affects the Secure cookie or the OAuth issuer. |
+| `AGORA_DATA_DIR` | Household files. Default `.agora-data`. Refresh records are `oauth-refreshes.json` in this directory. |
+| `AGORA_TIMEZONE` | Calendar day for "due today" and reminder times. The server reads it. `.env.example` does not list it yet. Unset uses the server's zone. |
+| `AGORA_SERVER_LLM` | Set to `bedrock` to call Amazon Bedrock when the browser sent no key. |
+| `DEMO_HOST_SECRET` | Room host code. On an open bind with no passcode, the office has no first-caller host. |
 
 Other scripts:
 
@@ -110,34 +135,34 @@ Try: "What is Mia allergic to?" after you have saved that fact on `/alexa`.
 
 AGORA existed before the window. The baseline tag `pre-window` is commit `4f61371` (2026-08-20).
 
-`git diff --stat pre-window..HEAD` on 8 Oct 2026, at commit `42a83b6`:
+`git diff --stat pre-window..HEAD` on 8 Oct 2026, at commit `fa7a9c0`:
 
 ```
-228 files changed, 22141 insertions(+), 2294 deletions(-)
+288 files changed, 29768 insertions(+), 2318 deletions(-)
 ```
 
-That range is 25 commits, all dated 2026-09-23 through 2026-10-08. September kept building the office (WebGL2, a swarm that finishes a document, Jev, replay). 8 Oct added the household brain: disk files, receipts, approvals, MCP and OAuth, Bedrock, the voice simulator and its fast path, the Household panel, the Agent Skill, the Alexa+ add-on, deploy notes, and the screen card.
+That range is 40 commits, dated 2026-09-23 through 2026-10-08. September kept building the office (WebGL2, a swarm that finishes a document, Jev, replay). 8 Oct added the household brain and, later the same day, the fix wave: people on facts and tasks, the shopping list, reminders, the approval gate in the voice loop, the household lock, persisted OAuth refresh, the MCP Apps card on tool results, and the Household cast in the office.
 
-The phase log is [docs/HACKATHON_CHANGES.md](docs/HACKATHON_CHANGES.md). This pitch and the judge docs are the phase 6 working tree, on top of that diff, until that phase is committed.
+The phase log is [docs/HACKATHON_CHANGES.md](docs/HACKATHON_CHANGES.md).
 
-Local fast path, no AWS: 55–58 ms to the first acknowledgement, about 100 ms for a full "remember" turn, about 800 ms for "plan dinners" to reach the approval card. Model-path and Polly numbers are `TODO(measure)`.
+The number to read on `/alexa` is time to first audio on the fast path. It is `TODO(measure)`. Model-path and Polly numbers are `TODO(measure)`. Older local timings were acknowledgement and screen times, not first audio: phase 4 saw the acknowledgement on the wire in 5 ms and on screen in 50 ms and 63 ms; phase 6 logged 55–58 ms to that acknowledgement, about 100 ms for a full remember turn, and about 800 ms from "plan dinners" to the approval card when a preview existed.
 
 ## Tracks and licence
 
 Tracks: Alexa+ (primary), AWS Builder, Open Source.
 
-Source code is MIT. See [LICENSE](LICENSE). Bundled 3D models are CC BY-NC 4.0. See [LICENSE-ASSETS.md](LICENSE-ASSETS.md).
+The window contribution is the household MCP work: the server, the skill, the voice page, and the files on disk. Source code is MIT. See [LICENSE](LICENSE). Bundled 3D models under `public/models/` are CC BY-NC 4.0 and are not needed for `/alexa`. See [LICENSE-ASSETS.md](LICENSE-ASSETS.md).
 
 Copy-ready Devpost text is [docs/SUBMISSION.md](docs/SUBMISSION.md). Also: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/AWS.md](docs/AWS.md), [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md), [docs/FEEDBACK.md](docs/FEEDBACK.md), [docs/FRICTION_LOG.md](docs/FRICTION_LOG.md).
 
 ## Limits
 
-- One household per server, and one office room in the memory of that process ([server/roomState.ts](server/roomState.ts), [docs/DEPLOY.md](docs/DEPLOY.md)). Waiting approvals are in that same process and expire after ten minutes.
-- Household files are on the task disk (`.agora-data` or `AGORA_DATA_DIR`). Replacing the task deletes them unless that directory is on a volume.
-- The Alexa+ add-on manifest distributes to the US only ([alexa-addon/addon.json](alexa-addon/addon.json)).
-- No device control. Lights, locks, and Hue routines are the loudest research gap, and this build does not claim them ([docs/research/feature-matrix.md](docs/research/feature-matrix.md)).
+- One household per server, and one office room in the memory of that process ([server/roomState.ts](server/roomState.ts), [docs/DEPLOY.md](docs/DEPLOY.md)). Waiting approvals and authorization codes are in that same process. Approvals expire after ten minutes. OAuth refresh records and the simulator's linked account are files and survive a restart.
+- Household files are on the task disk (`.agora-data` or `AGORA_DATA_DIR`). Replacing the task deletes them unless that directory is on a volume. `POST /api/memory` and `POST /api/tasks` do not yet accept `who`, `list`, or `dueAt`. A fact that starts with a capitalised name still stores `who`. The MCP tools accept the fields.
+- The Alexa+ add-on manifest distributes to the US only and was not deployed ([alexa-addon/addon.json](alexa-addon/addon.json)).
+- No device control, no calendar, and no countdown timer. Lights, locks, and Hue routines stay out of the demo ([docs/research/feature-matrix.md](docs/research/feature-matrix.md)).
 - The microphone uses Web Speech ([src/alexa/useSpeechInput.ts](src/alexa/useSpeechInput.ts)). Record in Chrome. The text box works when that API is missing.
-- A live Bedrock call and a successful Polly clip were not recorded here. The build shell had no AWS credentials.
+- A live Bedrock call and a successful Polly clip were not recorded here. The build shell had no AWS credentials. Time to first audio is `TODO(measure)`.
 
 No public deployment URL is recorded in this repository.
 
@@ -171,9 +196,9 @@ Not in this build: saved cloud rooms, accounts, spending caps, and host approval
 
 ## Joining the office
 
-Install and run from [Quick start](#quick-start). Open `http://localhost:3000` and join the room.
+Install and run from [Quick start](#quick-start). Open `http://127.0.0.1:3000/alexa` for the voice page. The office is `http://127.0.0.1:3000`.
 
-The first person to join is the host, unless `DEMO_HOST_SECRET` is set. With that variable set, only a matching host code, or the server-issued resume token, makes someone the host. A display name does not.
+On loopback, with no `DEMO_HOST_SECRET`, the first person to join is the host. On an open bind (`0.0.0.0`) with that secret unset, the first caller is not the host. The host seat is a household session, which exists only when `AGORA_HOUSEHOLD_PASSCODE` is set. With neither the secret nor the passcode, that room has no host. With the secret set, only a matching host code, or the server-issued resume token, makes someone the host. A display name does not. When a passcode is set, the office socket needs the `agora_household` cookie.
 
 A browser-supplied model key stays in `localStorage` under Model connections. The room does not store it. With `AGORA_SERVER_LLM=bedrock` and AWS credentials, the office can call Bedrock when the browser sent no key. See [docs/AWS.md](docs/AWS.md).
 
@@ -212,7 +237,7 @@ flowchart LR
   room --> ui
 ```
 
-The browser shows the office, chat, task board, and document. In development, the Vite server attaches the relay and the `/api/cors-proxy` route. The production entry, [server/prod.ts](server/prod.ts), listens on `0.0.0.0` and `PORT` (8080 if unset), serves `dist/`, and attaches the same relay and proxy.
+The browser shows the office, chat, task board, and document. In development, the Vite server attaches the relay and the `/api/cors-proxy` route. The production entry, [server/prod.ts](server/prod.ts), listens on `PORT` (8080 if unset). It binds `0.0.0.0` only when `AGORA_HOUSEHOLD_PASSCODE` is set, and `127.0.0.1` otherwise. It serves `dist/` and attaches the same relay and proxy.
 
 One process holds one room: roster, the last 100 public chat messages, cabin assignment, and a single run. Stages reported on that run are planning, working, debating, assembling, and repairing.
 
@@ -279,7 +304,7 @@ Verified from this repository:
 - `npm run build` writes the client to `dist/`.
 - `npm run preview` serves that client and does not start the room.
 - [Dockerfile](Dockerfile) builds the client, bundles [server/prod.ts](server/prod.ts) to `dist/server.mjs`, and runs `node dist/server.mjs`.
-- That process listens on `0.0.0.0` and `PORT`, default 8080, serves `dist/`, and attaches the relay.
+- That process listens on `PORT`, default 8080, and binds `0.0.0.0` only when `AGORA_HOUSEHOLD_PASSCODE` is set. It serves `dist/` and attaches the relay.
 
 The static prototype is [https://agora-gamma-seven.vercel.app](https://agora-gamma-seven.vercel.app). Joining there opens a local preview in the browser. It does not start the shared room, and it does not call a model.
 
@@ -291,7 +316,7 @@ When every browser disconnects, the sockets close. With a platform that stops an
 
 - One process, one room, at most five people.
 - Everyone in the room can see the brief, the tasks, the document, and public chat.
-- There are no accounts. Without `DEMO_HOST_SECRET`, the first joiner is the host. With it set, host authority is the host code or the resume token.
+- There are no accounts. On loopback, with no `DEMO_HOST_SECRET`, the first joiner is the host. On an open bind without that secret, the household session holds the host seat when a passcode is set, and the room has no host when it is not. With the secret set, host authority is the host code or the resume token.
 - Only the host can start a swarm, start a benchmark, or end the session.
 - Room state is memory. A restart or an idle shutdown clears it. Save a copy if you want a file.
 - There is no spending cap.

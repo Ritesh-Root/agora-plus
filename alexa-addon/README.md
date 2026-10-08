@@ -24,6 +24,9 @@ The shape matches the [MCP toolkit quickstart](https://developer.amazon.com/docs
 | `mediaAssets.icons.light` | all six sizes | 72, 64, 88, 126, 180, 241. PNG files are in `media/`. |
 | `mediaAssets.carouselImages` | at least one 600×900, `altText` ≤ 250 | `media/carousel-600x900.png`. |
 | `integrations[].config.endpoints.default.uri` | HTTPS MCP URL | `https://<host>/mcp`. |
+| `accountLinking` | enabled in this file | `enabled: true`, `type: AUTHORIZATION_CODE`, `pkce: S256`, scopes `mcp:tools` and `mcp:resources`, authorize and token URLs still under `https://<host>/...`. |
+
+Account linking is turned on in the manifest. The host is still a placeholder, and `alexa-ai` was not deployed from this repository. Redirect URIs must be listed in `AGORA_OAUTH_REDIRECT_URIS` and match exactly. See `skills/agora-household/references/ALEXA_ADDON.md`.
 
 The quickstart's icon objects have `size` and `uri` only. Alt text is on the carousel image. The published example uses HTTPS image URLs. These URIs point at `/media/` on the same host as the app. The PNG bytes are in this folder and are copied to `public/media/` so the production server can serve them.
 
@@ -31,4 +34,4 @@ Icon alt text, if a later form asks for it: "Butter-yellow ring on a dark ink sq
 
 ## Auth is not in this file
 
-Client id, client secret, and token URL are not fields in the quickstart schema. They are entered with `alexa-ai configure-account-linking` after the server is publicly reachable. See `skills/agora-household/references/ALEXA_ADDON.md`.
+Client id, client secret, and token URL are not fields in the quickstart schema. They are entered with `alexa-ai configure-account-linking` after the server is publicly reachable. The manifest's `accountLinking` block names the grant, PKCE, the scopes, and the `<host>` URLs. The redirect allowlist is `AGORA_OAUTH_REDIRECT_URIS` on the server, not a field in this file. See `skills/agora-household/references/ALEXA_ADDON.md`.

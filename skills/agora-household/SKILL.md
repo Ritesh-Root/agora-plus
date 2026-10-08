@@ -7,7 +7,7 @@ compatibility: Needs network access to a running AGORA+ server and a bearer toke
 
 # AGORA+ household
 
-AGORA+ is a self-hosted household brain. It remembers facts, keeps a task list, and plans work with a small team named Agora, Scout, Planner, and Keeper. Agents talk to it through the MCP server at `/mcp`, which speaks Streamable HTTP and protocol `2025-11-25`. Forgetting a fact or starting a plan does not happen until a person says yes.
+AGORA+ is a self-hosted household brain. It remembers facts, keeps a task list, and plans work with a small team named Agora, Scout, Planner, and Keeper. Agents talk to it through the MCP server at `/mcp`, Streamable HTTP. The server negotiates protocol `2025-11-25` and newer. Alexa's published client sample sends `2025-03-26`. The specification index on 8 Oct 2026 names `2026-07-28`. Forgetting a fact or starting a plan does not happen until a person says yes. Remembering and adding a task do not wait.
 
 Read [references/TOOLS.md](references/TOOLS.md) for every input field and output field. Read [references/ALEXA_ADDON.md](references/ALEXA_ADDON.md) only when shipping this server as an Alexa+ add-on.
 
@@ -23,7 +23,7 @@ claude mcp add --transport http agora <url>/mcp --header "Authorization: Bearer 
 
 Any other MCP client uses Streamable HTTP `POST <url>/mcp`. Send `Accept: application/json, text/event-stream` and `Authorization: Bearer <token>`. Two tokens work:
 
-- Development token: `AGORA_MCP_TOKEN`. It does not expire. It can list and call tools and read resources.
+- Development token: `AGORA_MCP_TOKEN`, at least 32 characters. A shorter value is ignored. It does not expire. It can list and call tools and read resources. It is ignored when `NODE_ENV=production` or `AGORA_PUBLIC_URL` is https, unless `AGORA_ALLOW_DEV_TOKEN=1`. Once OAuth is configured, the voice page does not fall back to this token.
 - OAuth: `POST <url>/oauth/token` with `Content-Type: application/x-www-form-urlencoded`. Client credentials use HTTP Basic (`client_id:client_secret`) and `grant_type=client_credentials` with `scope=mcp:service` and `resource=<url>/mcp`. That token can initialize and list. It cannot call tools or read resources. Calling those needs the authorization-code token, scope `mcp:tools mcp:resources`, from `GET <url>/oauth/authorize` with PKCE `S256`.
 
 If `AGORA_OAUTH_CLIENT_ID`, `AGORA_OAUTH_CLIENT_SECRET`, and `AGORA_TOKEN_SECRET` are unset, the OAuth routes return 503 and only the development token works. Access tokens last one hour. A client-credentials token has no refresh token; request a new one. An authorization-code token comes with a refresh token that rotates.
@@ -39,20 +39,20 @@ Call the tool whose description matches the request. One example each. Arguments
 
 | Tool | Use it when | Example arguments |
 | --- | --- | --- |
-| `remember` | Someone wants a fact kept, such as an allergy or a preference. | `{ "fact": "Mia is allergic to peanuts", "tags": ["allergy"] }` |
-| `recall` | Someone asks what is already saved. Empty query returns the newest facts. | `{ "query": "Mia allergy" }` |
+| `remember` | Someone wants a fact kept, such as an allergy or a preference. Optional `who` is the person the fact is about. A leading name is stored when `who` is omitted. | `{ "fact": "Mia is allergic to peanuts", "tags": ["allergy"] }` |
+| `recall` | Someone asks what is already saved. Empty query returns the newest facts. A tie speaks both matches. | `{ "query": "Mia allergy" }` |
 | `forget` | Someone wants a saved fact removed. This does not delete it. | `{ "query": "peanuts" }` |
-| `add_task` | Someone wants a to-do saved. This does not start a plan. | `{ "title": "Buy oat milk", "due": "2026-10-09" }` |
-| `list_tasks` | Someone asks what is on the list. | `{ "status": "open" }` |
+| `add_task` | Someone wants a to-do saved. This does not start a plan. Optional `who`, `list` (`shopping`), and `dueAt` (ISO 8601 with an offset). | `{ "title": "Buy oat milk", "list": "shopping" }` |
+| `list_tasks` | Someone asks what is on the list. `list` `shopping` is that list. Omit it for every list. | `{ "status": "open", "list": "shopping" }` |
 | `complete_task` | Someone says a task is done. Match the id or the title. | `{ "taskIdOrTitle": "Buy oat milk" }` |
 | `daily_briefing` | Someone wants this morning at home. No model call. | `{}` |
-| `plan_and_run` | Someone wants the team to plan a goal, such as a week of meals. This does not start the team. | `{ "goal": "Plan dinners for this week" }` |
+| `plan_and_run` | Someone wants the team to plan a goal, such as a week of meals. This does not start the team. An order, purchase, booking, payment, or phone call is refused, with no approval id. | `{ "goal": "Plan dinners for this week" }` |
 | `get_run_status` | Someone asks how a plan is going. Omit `runId` for the latest run. | `{}` |
 | `approve_action` | A tool returned `needs_approval` and the person has given an explicit yes or no. | `{ "approvalId": "<approvalId>", "decision": "approve" }` |
 | `ask_agora` | A household question, such as an allergy. Answers from saved memory. It does not change anything. | `{ "question": "What is Mia allergic to?" }` |
-| `web_research` | The question needs the public web, such as a current price. | `{ "question": "What does oat milk cost this week?" }` |
+| `web_research` | The question needs the public web, such as a current price. Registered only when `FIRECRAWL_API_KEY` or `EXA_API_KEY` is set. | `{ "question": "What does oat milk cost this week?" }` |
 
-`ask_agora`, `plan_and_run`, and `web_research` may call the server model. The other tools do not. Alexa+ wants a round trip under 500 ms for tools that do not call a model. Prefer `recall`, `list_tasks`, and `daily_briefing` for those questions.
+`ask_agora`, `plan_and_run`, and `web_research` may call the server model. The other tools do not. `ask_agora` allows about 4 seconds for an Alexa client and 9 seconds when the MCP client name is `agora-plus-voice`. Alexa+ wants a round trip under 500 ms for tools that do not call a model. Prefer `recall`, `list_tasks`, and `daily_briefing` for those questions. `daily_briefing` speaks a saved allergy when one is stored.
 
 ## Resources and prompts
 
@@ -70,11 +70,11 @@ Prompts:
 
 ## Approval
 
-`forget` and `plan_and_run` return `status: "needs_approval"` and an `approvalId`. Show the person the `summary` or `preview` and ask for a yes or a no. Call `approve_action` only after an explicit yes (`yes`, `approve`, `do it`) or an explicit no (`no`, `don't`, `cancel`).
+`forget` and `plan_and_run` return `status: "needs_approval"` and an `approvalId`. Show the person the `summary` or `preview` and ask for a yes or a no. Call `approve_action` only after an explicit whole-phrase yes (`yes`, `yeah`, `yep`, `go ahead`, `do it`, `approve`, `yes go ahead`, `sure`, `ok go ahead`, `okay go ahead`) or an explicit whole-phrase no (`no`, `nope`, `cancel`, `don't`, `stop`, `no cancel that`). "yes but not Tuesday" and "yesterday" are not a decision. "don't forget …" is a remember request, not a no.
 
-Never approve on the person's behalf. Do not treat silence, an earlier yes, or your own judgment as approval. A screen card may call `approve_action` when the person taps Approve or Decline. Do not send a second decision for the same id. A yes for one approval does not cover the next one. If they change the subject, leave the approval waiting. Approvals expire after ten minutes. If `approve_action` says the approval expired, ask again and get a new yes.
+On the voice simulator the model cannot call `approve_action`. A person uses one of those phrases or a button. This skill is for external clients, including an Alexa+ add-on, where `approve_action` remains a tool. Never approve on the person's behalf. Do not treat silence, an earlier yes, or your own judgment as approval. A screen card may call `approve_action` when the person taps Approve or Decline. Do not send a second decision for the same id while it is running. A failed yes, including a busy room, leaves the approval pending. Ask again. A yes for one approval does not cover the next one. If they change the subject, leave the approval waiting. Approvals expire after ten minutes and do not survive a process restart. If `approve_action` says the approval expired, ask again and get a new yes.
 
-`decision: "approve"` is the only call that deletes a memory or starts the household team. `decision: "reject"` leaves things as they are.
+`decision: "approve"` is the only call that deletes a memory or starts the household team. `decision: "reject"` leaves things as they are. Redirect URIs for account linking must be listed in `AGORA_OAUTH_REDIRECT_URIS`. The server matches them exactly.
 
 ## Voice
 

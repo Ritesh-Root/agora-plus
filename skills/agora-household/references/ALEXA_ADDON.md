@@ -79,16 +79,20 @@ Account linking is authorization code plus PKCE `S256`. The user scopes are `mcp
 | Token URL | `https://<host>/oauth/token` |
 | Scopes | `mcp:tools mcp:resources` |
 
-`alexa-ai deploy` checks that discovery lists `S256`. This server does. It also issues a refresh token for the authorization-code grant and none for client credentials. Access tokens last 3600 seconds.
+`alexa-ai deploy` checks that discovery lists `S256`. This server does. It also issues a refresh token for the authorization-code grant and none for client credentials. Access tokens last 3600 seconds. Refresh records persist in `oauth-refreshes.json` under `AGORA_DATA_DIR`. Reusing a refresh token revokes every refresh record for that subject. Authorization codes still live only in memory for the five-minute consent window.
 
-Register every Alexa redirect URI the CLI prints. At request time this server accepts any `https` redirect URI and echoes the `redirect_uri` Alexa sent. Still register the full list on the Amazon side.
+`alexa-addon/addon.json` sets `accountLinking.enabled` to true, type `AUTHORIZATION_CODE`, PKCE `S256`, scopes `mcp:tools` and `mcp:resources`, and authorize and token URLs under `https://<host>/...`. Those URLs stay placeholders until a real hostname replaces `<host>`. `alexa-ai` was not run from this workspace.
 
-Set `AGORA_PUBLIC_URL` to `https://<host>` with no path, so the discovery document and the manifest name the same MCP resource.
+Register every Alexa redirect URI the CLI prints in `AGORA_OAUTH_REDIRECT_URIS`, comma-separated. The server accepts a `redirect_uri` only when it matches one of those strings exactly. The simulator's own `http://127.0.0.1`, `http://localhost`, and `::1` callbacks are always allowed. Any other URL, including a random `https` URL, is rejected. `state` is required. Send the client secret in HTTP Basic or the form body, never both.
+
+Set `AGORA_PUBLIC_URL` to `https://<host>` with no path, so the discovery document and the manifest name the same MCP resource. On a process that is not bound to loopback, OAuth and `/mcp` return 503 until that variable is set. Production binds `0.0.0.0` only when `AGORA_HOUSEHOLD_PASSCODE` is set. `AGORA_TOKEN_SECRET` must be at least 32 characters or OAuth stays off. The development token is ignored in production and when `AGORA_PUBLIC_URL` is https, unless `AGORA_ALLOW_DEV_TOKEN=1`.
+
+The voice simulator does not let the model call `approve_action`. A person on that page uses an exact yes or no, or a button. An Alexa+ client still calls `approve_action` after the person says yes. `ask_agora` allows about 4 seconds for that client.
 
 ## Limits that matter here
 
 - Distribution is `US` only. A developer outside the US can still build the package. A real Alexa+ device test needs a US account.
-- Tools that do not call a model should answer in under 500 ms. `remember`, `recall`, `forget`, `add_task`, `list_tasks`, `complete_task`, `daily_briefing`, `get_run_status`, and `approve_action` are in that set. `ask_agora`, `plan_and_run`, and `web_research` may call Bedrock and can be slower.
+- Tools that do not call a model should answer in under 500 ms. `remember`, `recall`, `forget`, `add_task`, `list_tasks`, `complete_task`, `daily_briefing`, `get_run_status`, and `approve_action` are in that set. `ask_agora` allows about 4 seconds for an Alexa client and 9 seconds for the voice simulator. `plan_and_run` and `web_research` may call Bedrock and can be slower.
 - An unauthenticated `POST /mcp` is `401` with an empty body and no `WWW-Authenticate` header. That matches the quickstart. The account-linking page shows a JSON body on 401. This server stays with the empty body.
 - `name.value` is at most 30 characters. `shortDescription` is at most 123. `fullDescription` is at most 4000. `examplePhrases` is 3 or 4 items, each at most 200 characters. Carousel `altText` is at most 250 characters.
 - Icon sizes, all required: 72, 64, 88, 126, 180, and 241. One carousel image is 600×900.

@@ -2,7 +2,9 @@
 
 One process holds the office room and the waiting approvals in memory. Run one task. A second task has its own room and will not see the first task's approvals. Household files live under `.agora-data` (or `AGORA_DATA_DIR`) on that task's disk. Replacing the task deletes them unless that directory is on a volume that survives the replacement.
 
-The production process is `server/prod.ts`, bundled to `dist/server.mjs`. It listens on `0.0.0.0` and `PORT` (8080 when unset), serves `dist/`, and attaches the same relay and MCP routes as the dev server. Do not put secrets in the image.
+The production process is `server/prod.ts`, bundled to `dist/server.mjs`. It listens on `PORT` (8080 when unset). It binds `0.0.0.0` only when `AGORA_HOUSEHOLD_PASSCODE` is set. Otherwise it binds `127.0.0.1` and the log says why. It serves `dist/` and attaches the same relay and MCP routes as the dev server. Do not put secrets in the image.
+
+`npm run dev` binds `127.0.0.1`. `npm run dev:lan` binds `0.0.0.0`. On any bind that is not loopback, OAuth and `/mcp` return 503 until `AGORA_PUBLIC_URL` is set. With no passcode, every `/api/*` household route returns 403 unless the socket address is loopback. Loopback with no passcode still serves the household.
 
 Build locally:
 
@@ -215,16 +217,18 @@ Every name in `.env.example`. Empty in that file means unset. Do not commit real
 | `TYPESAFE_BASE_URL` | optional | `https://api.typesafe.ai` | Decider base URL. |
 | `JEV_MODEL` | optional | `jev-1.13.0` | Decider model id. |
 | `DASHSCOPE_API_KEY` | optional | none | Server key for the Qwen Cloud writing model. Token Plan keys (`sk-sp-…`) use the Token Plan host. |
-| `QWEN_BASE_URL` | optional | `https://token-plan.maas.qwencloudapi.com/compatible-mode/v1` | Listed as an override. The server does not read this name. That host is what it uses when the caller does not pass a base URL. |
-| `QWEN_MODEL` | optional | `deepseek-v4.1-flash` | Listed as an override. The server does not read this name. That model is the writing default when the caller does not pass one. |
+| `AGORA_TIMEZONE` | optional | the server zone | IANA zone for "due today", "at 6pm", and "in 10 minutes". Times are stored as ISO 8601 with a numeric offset. The server reads this name. `.env.example` does not list it yet. |
 | `EXA_API_KEY` | optional | none | Web search for tasks the decider marks as needing current information, and a fallback for `web_research`. Server only. |
-| `AGORA_PUBLIC_URL` | optional locally, required for Alexa+ | request origin | Public HTTPS origin, no path. OAuth resource identifier and discovery issuer when set. |
+| `AGORA_PUBLIC_URL` | required off loopback | request origin on loopback | Public HTTPS origin, no path. OAuth resource identifier and discovery issuer when set. OAuth and `/mcp` return 503 when this is unset and the process is not bound to loopback. |
+| `AGORA_TRUST_PROXY` | optional | unset | Set to `1` before `X-Forwarded-Proto` sets the Secure cookie or the OAuth issuer. Otherwise that header is ignored. |
+| `AGORA_OAUTH_REDIRECT_URIS` | required for a public Alexa redirect | none | Comma-separated exact `redirect_uri` values. Anything else is rejected. The simulator's own `http://127.0.0.1`, `http://localhost`, and `::1` callbacks are always allowed. |
 | `AGORA_DATA_DIR` | optional | `.agora-data` | Directory for memory, tasks, approvals, and saved runs. |
 | `AGORA_OAUTH_CLIENT_ID` | optional | none | OAuth client id. OAuth stays off until this, the secret, and `AGORA_TOKEN_SECRET` are all set. |
 | `AGORA_OAUTH_CLIENT_SECRET` | optional | none | OAuth client secret. Server only. |
-| `AGORA_TOKEN_SECRET` | optional | none | HMAC secret for access and refresh tokens. Server only. |
-| `AGORA_HOUSEHOLD_PASSCODE` | optional | none | When set, household HTTP routes return `household_locked` until the passcode cookie is set. |
-| `AGORA_MCP_TOKEN` | optional | none | Development bearer token for MCP Inspector and Claude Code. It does not expire. |
+| `AGORA_TOKEN_SECRET` | optional | none | HMAC secret for access and refresh tokens. Server only. OAuth stays off when it is shorter than 32 characters. |
+| `AGORA_HOUSEHOLD_PASSCODE` | required to bind `0.0.0.0` | none | When set, household HTTP routes return `household_locked` until the passcode cookie is set, and production listens on `0.0.0.0`. When unset, production listens on `127.0.0.1` and household routes answer only on loopback. Five wrong guesses lock that address for 15 minutes (HTTP 429), shared with the OAuth consent page. |
+| `AGORA_MCP_TOKEN` | optional | none | Development bearer for the MCP Inspector and Claude Code. At least 32 characters. A shorter value is ignored. Ignored when `NODE_ENV=production` or `AGORA_PUBLIC_URL` is https, unless `AGORA_ALLOW_DEV_TOKEN=1`. It does not expire. |
+| `AGORA_ALLOW_DEV_TOKEN` | optional | unset | Set to `1` to keep `AGORA_MCP_TOKEN` in production or behind an https public URL. |
 | `AGORA_SERVER_LLM` | optional | none | Set to `bedrock` to call Amazon Bedrock when the browser sent no key. |
 | `AWS_REGION` | optional | `us-east-1` for Bedrock | Region for Bedrock and Polly. |
 | `BEDROCK_MODEL` | optional | `anthropic.claude-sonnet-5` | Bedrock Messages model. |
@@ -236,4 +240,6 @@ Every name in `.env.example`. Empty in that file means unset. Do not commit real
 | `POLLY_ENGINE` | optional | `neural` | Amazon Polly engine. |
 | `FIRECRAWL_API_KEY` | optional | none | Web research. Falls back to Exa when unset. Server only. |
 
-`PORT` is not in `.env.example`. `server/prod.ts` uses it and defaults to 8080.
+`PORT` is commented in `.env.example`. `server/prod.ts` uses it and defaults to 8080. Also in that file, and forwarded into the dev server: `DEMO_HOST_SECRET`, `SOCIETY_REPLAY`, `BENCH_REPLAY`, and `DISABLE_HMR`. `QWEN_BASE_URL` and `QWEN_MODEL` are not in `.env.example`. The server does not read them.
+
+On an open bind with no `DEMO_HOST_SECRET`, the office host seat is the household session, not the first caller. With a passcode set, `/api/cors-proxy`, `/api/model-test`, and the `/__relay` upgrade require the `agora_household` cookie. Refresh records persist in `oauth-refreshes.json` under `AGORA_DATA_DIR`. The simulator link persists in `oauth-sim-account.json`. Waiting approvals and authorization codes are still only in memory.

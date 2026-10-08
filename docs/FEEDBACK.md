@@ -13,7 +13,7 @@ Written from this repository on 8 Oct 2026. Each note says what we actually did.
 - The authentication page's runtime flow and its checklist disagree on the client-credentials scope. Step 5 says `mcp:tools`. The checklist says that grant may only issue `mcp:service`. This server issues `mcp:service` only. `tools/call` needs `mcp:tools` from the authorization-code grant or from `AGORA_MCP_TOKEN` ([docs/FRICTION_LOG.md](FRICTION_LOG.md)).
 - The account-linking sample shows `401` with `{ "error": "unauthorized" }`. The quickstart says 401 without `WWW-Authenticate`. This server returns an empty body. A local production smoke test on port 8099 did that.
 - The quickstart centers account linking. The authentication page also requires a client-credentials token for the service. An implementer has to read both and pick the checklist.
-- The project plan records that lifecycle examples show protocol `2025-03-26` while the add-on requirement we built is `2025-11-25` ([docs/plan/ROADMAP.md](plan/ROADMAP.md)). [server/mcp/mcp.test.ts](../server/mcp/mcp.test.ts) asserts the negotiated version is at least `2025-11-25`.
+- Three protocol dates are in play. [server/mcp/mcp.test.ts](../server/mcp/mcp.test.ts) asserts the negotiated version is at least `2025-11-25`. Alexa's published client sample sends `2025-03-26`. The specification index on 8 Oct 2026 names 2026-07-28 as current ([docs/council/reports/g4-spec-followup.md](council/reports/g4-spec-followup.md)). The plan still records lifecycle samples on `2025-03-26` ([docs/plan/ROADMAP.md](plan/ROADMAP.md)).
 - Alexa+ distribution in the manifest is `US` only ([alexa-addon/addon.json](../alexa-addon/addon.json)). A developer outside the US cannot finish a device test. `alexa-ai` was not installed or deployed here, so this is the documented limit, not a CLI error we hit.
 
 **Onboarding.** The quickstart is the right length. It needs one manifest, one token command, and one protocol version, matching the pages a reviewer will open next.
@@ -36,13 +36,13 @@ Written from this repository on 8 Oct 2026. Each note says what we actually did.
 
 **Used for.** `@modelcontextprotocol/server` 2.3.1, `@modelcontextprotocol/node` 2.1.1, and `@modelcontextprotocol/client` 2.3.1. The server is `createMcpHandler(factory, { legacy: 'stateless' })` plus `toNodeHandler` ([server/mcp/http.ts](../server/mcp/http.ts)). Tests use `StreamableHTTPClientTransport` against an ephemeral server ([server/mcp/mcp.test.ts](../server/mcp/mcp.test.ts)). The screen card uses `@modelcontextprotocol/ext-apps` 2.0.3.
 
-**What worked.** Stateless Streamable HTTP, protocol 2025-11-25, tool output schemas, resources, prompts, and the Apps `ui://` resource all landed in one server. The official client accepts the stream our curl client had to parse by hand.
+**What worked.** Stateless Streamable HTTP, a negotiated version of 2025-11-25 or newer, tool output schemas, resources, prompts, and the Apps `ui://` resource all landed in one server. `daily_briefing` and `list_tasks` now set the card URI on the tool result as well as the definition, and the server advertises `io.modelcontextprotocol/ui`. The official client accepts the stream our curl client had to parse by hand.
 
 **What needs work.**
 
 - `legacy: 'stateless'` still answers `initialize` as an SSE frame (`event: message` / `data: {...}`), which the v2 serving notes describe as a single JSON body unless the handler emits a notification ([docs/FRICTION_LOG.md](FRICTION_LOG.md)).
 - The client's `authProvider` replaces `Authorization` after the caller sets it, and `token()` cannot see the JSON-RPC method. The voice bridge uses a custom `fetch` that reads the body and sets the header when the body contains `"tools/call"` ([server/alexaSim/bridge.ts](../server/alexaSim/bridge.ts)).
-- Stateless legacy instances that never saw `initialize` hold no capability view, so the elicitation gates refuse (the `createMcpHandler` types say per-request instances that never saw an initialize hold nothing, so gates refuse there). A voice approval cannot pause inside one `tools/call`. We return `needs_approval` and an `approvalId`, and the client calls `approve_action` ([server/household/approvals.ts](../server/household/approvals.ts)).
+- Stateless legacy instances that never saw `initialize` hold no capability view, so the elicitation gates refuse (the `createMcpHandler` types say per-request instances that never saw an initialize hold nothing, so gates refuse there). A voice approval cannot pause inside one `tools/call`. We return `needs_approval` and an `approvalId`. On `/alexa` the person says an exact yes or no, or uses a button. The model is not given `approve_action`. External clients still call that tool ([server/household/approvals.ts](../server/household/approvals.ts)).
 - `@modelcontextprotocol/ext-apps` pulled the MCP client and every Zod locale into the card. Aliasing the import to the package's `app-with-deps` browser file still left the HTML at about 416KB ([docs/FRICTION_LOG.md](FRICTION_LOG.md)).
 
 **Onboarding.** The handler options are clear once you read the `legacy` union. Say in the serving page that stateless `initialize` is SSE, and show the two-call approval pattern next to elicitation.
@@ -93,9 +93,9 @@ A live call was not made. The phase 3 shell had no AWS credentials.
 
 **What worked.** The fallback is the right shape for a demo machine with no credentials. The cache key (engine, voice, text) is enough. The voice page does not block the acknowledgement on Polly: the SSE `ack` event goes out first.
 
-**What needs work.** With no credentials, TTS returned 503 `tts_unavailable` in about 2 seconds ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)). That delay is the failure path, not speech. A successful neural synthesize is `TODO(measure)`. Headless Chromium's `speechSynthesis` never fired `onstart`, so the on-screen latency meter stayed empty until we recorded the acknowledgement from the screen time ([docs/FRICTION_LOG.md](FRICTION_LOG.md)).
+**What needs work.** With no credentials, TTS returned 503 `tts_unavailable` in about 2 seconds ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)). That delay is the failure path, not speech. A successful neural synthesize is `TODO(measure)`. The meter now records time to first audio only when playback starts, and says "text only" when it does not. Headless Chromium's `speechSynthesis` never fired `onstart` during the phase 4b pass ([docs/FRICTION_LOG.md](FRICTION_LOG.md)).
 
-**Onboarding.** The API is small. Document the 503-plus-browser-fallback as a normal local path, and document that the latency meter needs a real voice engine if you are judging time to first speech.
+**Onboarding.** The API is small. Document the 503-plus-browser-fallback as a normal local path, and document that time to first audio needs a voice engine that actually starts.
 
 **Build again?** Yes. Polly for the shipped voice, and browser speech for laptops that have not logged in, is what we would keep.
 
@@ -121,7 +121,7 @@ A live call was not made. The phase 3 shell had no AWS credentials.
 
 ### Important
 
-4. **Lifecycle samples on protocol 2025-11-25.** The plan records samples on 2025-03-26 ([docs/plan/ROADMAP.md](plan/ROADMAP.md)). The server we shipped negotiates 2025-11-25.
+4. **Name the three protocol dates in one place.** This server negotiates 2025-11-25 and newer. Alexa's published client sample sends 2025-03-26 ([docs/plan/ROADMAP.md](plan/ROADMAP.md) still records that sample). The specification index on 8 Oct 2026 names 2026-07-28.
 5. **Document stateless approvals.** State that `legacy: 'stateless'` cannot elicit inside one tool call, and show `needs_approval` plus `approve_action` as the supported pattern. That is what [skills/agora-household/SKILL.md](../skills/agora-household/SKILL.md) has to teach by hand.
 6. **Say which Claude models use the Messages endpoint.** Name the Mantle action `bedrock-mantle:CreateInference`, the model ids, and that Converse is the older client. The Mantle npm package should not depend on `@aws-sdk/client-bedrock-runtime`.
 7. **Firecrawl: a block list and a short-quote mode.** Do not return a newsletter wall or a multi-paragraph extract as a direct quote. Do not retry Reddit, CNET, or Tom's Guide on the same key.
@@ -131,5 +131,5 @@ A live call was not made. The phase 3 shell had no AWS credentials.
 8. **Serving docs: stateless `initialize` is still an SSE event.** Curl users and the Inspector should treat `event: message` as success.
 9. **Let `authProvider.token()` see the JSON-RPC method,** or leave an `Authorization` header the caller already set.
 10. **A browser build of `@modelcontextprotocol/ext-apps` that leaves out unused Zod locales.** The household card is about 416KB, almost all of it that file.
-11. **Headless `speechSynthesis` should fire `onstart`.** The latency meter on `/alexa` could not see time to first speech in headless Chromium.
+11. **Headless `speechSynthesis` should fire `onstart`.** The latency meter on `/alexa` is time to first audio. In headless Chromium it stays "text only" when `onstart` never fires.
 12. **Prefer the scraped body over the search blurb** when they disagree on a date, and cap direct quotes at one sentence before they enter a quote bank.
