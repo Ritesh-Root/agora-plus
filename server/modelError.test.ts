@@ -14,6 +14,15 @@ describe('publicModelError', () => {
     expect(publicModelError(new Error('Inference API error (403): AccessDenied.Unpurchased'))).toBe('That model is not available.');
   });
 
+  it('names a throttle without the provider body', () => {
+    const secret = 'sk-secret-value';
+    const text = publicModelError(new Error(`ThrottlingException (429): {"echo":"${secret}"}`));
+    expect(text).toBe('The model is busy right now. Try again in a moment.');
+    expect(text).not.toContain(secret);
+    expect(publicModelError(new Error('Too many requests'))).toBe('The model is busy right now. Try again in a moment.');
+    expect(publicModelError(new Error('ThrottlingException'))).toBe('The model is busy right now. Try again in a moment.');
+  });
+
   it('names an unreachable service', () => {
     expect(publicModelError(new Error('getaddrinfo ENOTFOUND invalid.example'))).toBe('The model service could not be reached.');
     expect(publicModelError(Object.assign(new Error('The operation was aborted'), { name: 'TimeoutError' }))).toBe('The model service could not be reached.');

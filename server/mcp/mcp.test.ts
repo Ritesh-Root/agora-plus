@@ -216,13 +216,13 @@ describe('MCP endpoint', () => {
     await expect(connected.callTool({ name: 'recall', arguments: { query: 'milk' } })).rejects.toThrow(/mcp:tools/);
   });
 
-  it('holds a plan for approval and does not research the web yet', async () => {
+  it('does not approve a plan when planning is unavailable, and does not research the web yet', async () => {
     const connected = await connect('dev-token');
     const plan = await connected.callTool({ name: 'plan_and_run', arguments: { goal: 'Plan dinners this week' } });
-    expect(plan.isError).toBeUndefined();
-    expect(structured(plan).status).toBe('needs_approval');
-    expect(typeof structured(plan).approvalId).toBe('string');
-    expect(String(structured(plan).preview)).toContain('Plan dinners this week');
+    expect(plan.isError).toBe(true);
+    expect(structured(plan).status).toBe('error');
+    expect(structured(plan).approvalId).toBeUndefined();
+    expect(String(structured(plan).speech)).toMatch(/unavailable/i);
 
     const research = await connected.callTool({ name: 'web_research', arguments: { question: 'pasta prices' } });
     expect(research.isError).toBe(true);

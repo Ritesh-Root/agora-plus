@@ -98,13 +98,15 @@ registerApprovalHandler('start_run', async (payload) => {
   const brief = typeof record.brief === 'string' && record.brief.trim()
     ? record.brief
     : householdBrief(goal, memories);
+  const presetTasks = asTasks(record.presetTasks);
+  if (!presetTasks) return { ok: false as const, error: PLAN_UNAVAILABLE };
   const provider = await getServerProvider();
   return startSocietyRun({
     brief,
     provider,
     team: HOUSEHOLD_TEAM,
     source: 'household',
-    presetTasks: asTasks(record.presetTasks),
+    presetTasks,
   });
 });
 
@@ -130,7 +132,7 @@ export async function forget(memoryIdOrQuery: string) {
   const byId = (await listMemory()).find((entry) => entry.id === query);
   const target = byId ?? (await searchMemory(query))[0];
   if (!target) return { ok: false as const, error: 'No matching memory.' };
-  const approval = requestApproval('forget', `Forget: ${clip(target.text, 80)}`, { id: target.id });
+  const approval = requestApproval('forget', `Forget that ${clip(target.text, 80)}? Say yes or no.`, { id: target.id });
   return {
     ok: true as const,
     status: 'needs_approval' as const,
@@ -205,7 +207,25 @@ const ASK_SYSTEM = [
 ].join(' ');
 
 const FAST_FALLBACK = 'anthropic.claude-haiku-4-5';
-const ASK_TIMEOUT_MS = 9_000;
+const ASK_ALEXA_TIMEOUT_MS = 4_000;
+const ASK_SIMULATOR_TIMEOUT_MS = 9_000;
+const PLAN_UNAVAILABLE = 'Planning is unavailable right now.';
+const CANNOT_CARRY_OUT = 'AGORA+ can plan and list, but it cannot place orders, buy, book, pay, or call.';
+
+/** Alexa gets about 4 seconds. The voice simulator may wait the longer 9 seconds. */
+export function askTimeoutMs(caller: 'alexa' | 'simulator'): number {
+  return caller === 'simulator' ? ASK_SIMULATOR_TIMEOUT_MS : ASK_ALEXA_TIMEOUT_MS;
+}
+
+/** Orders, purchases, bookings, payments, and phone calls are not something this household can do. */
+function cannotCarryOut(goal: string): boolean {
+  const text = goal.toLowerCase();
+  if (/\b(order|ordering|buy|buying|purchase|purchasing|booking|reservation|reservations|payment|payments|paying)\b/.test(text)) return true;
+  if (/\b(pay|call|calling|phone)\b/.test(text)) return true;
+  if (/\bbook\b/.test(text)) return true;
+  return false;
+}
+
 const RESEARCH_UNAVAILABLE = "Web research isn't set up on this server.";
 
 const READ_TOOLS: ToolDefinition[] = [
@@ -403,6 +423,9 @@ async function executeAsk(name: string, input: unknown): Promise<unknown> {
 export async function requestRun(goal: string) {
   const trimmed = goal.trim();
   if (!trimmed) return { ok: false as const, error: 'A goal is required.' };
+  if (cannotCarryOut(trimmed)) {
+    return { ok: false as const, status: 'error' as const, error: CANNOT_CARRY_OUT, speech: CANNOT_CARRY_OUT };
+  }
   const memories = await searchMemory(trimmed);
   const brief = householdBrief(trimmed, memories);
   let tasks: SocietyTask[] = [];
@@ -411,17 +434,17 @@ export async function requestRun(goal: string) {
     const planned = await planSociety(brief, provider, { team: HOUSEHOLD_TEAM });
     tasks = planned.tasks;
   } catch (error) {
-    // The run plans again after approval, so a failed preview only loses the step list.
     console.warn('[household] plan preview failed:', error instanceof Error ? error.message.slice(0, 200) : 'unknown error');
-    tasks = [];
+    return { ok: false as const, status: 'error' as const, error: PLAN_UNAVAILABLE, speech: PLAN_UNAVAILABLE };
   }
-  const summary = tasks.length > 0
-    ? `Plan: ${tasks.length} step${tasks.length === 1 ? '' : 's'} — ${tasks.map((task) => task.title).join('; ')}`
-    : `Plan: ${clip(trimmed, 120)}. The household team starts only after you approve.`;
+  if (tasks.length === 0) {
+    return { ok: false as const, status: 'error' as const, error: PLAN_UNAVAILABLE, speech: PLAN_UNAVAILABLE };
+  }
+  const summary = `Plan: ${tasks.length} step${tasks.length === 1 ? '' : 's'} — ${tasks.map((task) => task.title).join('; ')}`;
   const approval = requestApproval('start_run', summary, {
     goal: trimmed,
     brief,
-    ...(tasks.length > 0 ? { presetTasks: tasks } : {}),
+    presetTasks: tasks,
   });
   return {
     ok: true as const,
@@ -437,8 +460,8 @@ export async function planAndRun(goal: string) {
   return requestRun(goal);
 }
 
-/** Fast-model tool loop. A missing model or a 9s timeout falls back to saved memory. */
-export async function askAgora(question: string, deps?: { create?: ToolCreate; model?: string }) {
+/** Fast-model tool loop. A missing model or a timeout falls back to saved memory. */
+export async function askAgora(question: string, deps?: { create?: ToolCreate; model?: string; timeoutMs?: number }) {
   const trimmed = question.trim();
   if (!trimmed) return { ok: false as const, error: 'Ask a question about the household.' };
   const memories = await searchMemory(trimmed);
@@ -447,6 +470,7 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
     ? `Household memory:\n${top.map((entry) => `- ${entry.text}`).join('\n')}\n\nQuestion: ${trimmed}`
     : `Question: ${trimmed}`;
 
+  const timeoutMs = deps?.timeoutMs ?? askTimeoutMs('alexa');
   let create = deps?.create;
   let model = deps?.model || FAST_FALLBACK;
   if (!create) {
@@ -460,7 +484,7 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
           system: params.system,
           tools: params.tools as BedrockCreateParams['tools'],
           messages: params.messages as BedrockCreateParams['messages'],
-        });
+        }, { timeout: timeoutMs, maxRetries: 0, signal: params.signal });
       }
     } catch {
       create = undefined;
@@ -470,6 +494,8 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
 
   const sources: ResearchSource[] = [];
   const tools = askTools();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const loop = await withTimeout(runToolLoop({
       create,
@@ -477,6 +503,7 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
       system: ASK_SYSTEM,
       tools,
       messages: [{ role: 'user', content: user }],
+      signal: controller.signal,
       execute: async (name, input) => {
         const value = await executeAsk(name, input);
         if (name === 'web_research' && value && typeof value === 'object' && Array.isArray((value as { sources?: unknown }).sources)) {
@@ -486,7 +513,7 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
         }
         return value;
       },
-    }), ASK_TIMEOUT_MS);
+    }), timeoutMs);
     if (loop.stopReason === 'refusal' || !loop.text.trim()) {
       const fallback = recallAnswer(memories);
       return { ...fallback, toolCalls: loop.toolCalls, ...(sources.length > 0 ? { sources } : {}) };
@@ -502,6 +529,8 @@ export async function askAgora(question: string, deps?: { create?: ToolCreate; m
     };
   } catch {
     return recallAnswer(memories);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

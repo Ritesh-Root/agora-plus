@@ -1,12 +1,12 @@
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getRunRecord } from '../runEngine';
 import { defaultServerProvider } from '../llm/serverProvider';
 import type { ServerProvider } from '../society/provider';
-import { askAgora, requestRun, setServerProviderFactory } from './actions';
-import { clearPendingApprovals, resolveApproval } from './approvals';
+import { askAgora, askTimeoutMs, forget, requestRun, setServerProviderFactory } from './actions';
+import { clearPendingApprovals, listPendingApprovals, resolveApproval } from './approvals';
 import { addMemory } from './memoryStore';
 import { setDataDir } from './store';
 
@@ -142,5 +142,128 @@ describe('requestRun', () => {
     ]);
     expect(plans).toBe(1);
     expect(saved?.spokenSummary).toMatch(/allergic to peanuts/);
+  });
+
+  it('does not create an approval when the preview fails', async () => {
+    const provider: ServerProvider = {
+      prepareRequest() {},
+      takeUsage() {
+        return { calls: 0, promptTokens: 0, completionTokens: 0, missingUsage: 0 };
+      },
+      async generateCompletion() {
+        throw Object.assign(new Error('ThrottlingException (429)'), { status: 429 });
+      },
+    };
+    setServerProviderFactory(async () => provider);
+    const pending = await requestRun('Plan dinners this week');
+    expect(pending.ok).toBe(false);
+    if (pending.ok) return;
+    expect(pending.error).toMatch(/unavailable/i);
+    expect(listPendingApprovals()).toHaveLength(0);
+  });
+
+  it('refuses an order and still plans a week of meals', async () => {
+    const refused = await requestRun('Order lunch');
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error).toMatch(/cannot place orders/i);
+    expect('approvalId' in refused).toBe(false);
+    expect(listPendingApprovals()).toHaveLength(0);
+
+    for (const goal of ['buy milk', 'book a table', 'make a reservation', 'pay the bill', 'call Mom']) {
+      const blocked = await requestRun(goal);
+      expect(blocked.ok).toBe(false);
+    }
+
+    const provider: ServerProvider = {
+      prepareRequest() {},
+      takeUsage() {
+        return { calls: 0, promptTokens: 0, completionTokens: 0, missingUsage: 0 };
+      },
+      async generateCompletion() {
+        return {
+          content: JSON.stringify([
+            { id: 'a', title: 'List dinners', role: 'Planner', prompt: 'List seven dinners' },
+          ]),
+        };
+      },
+    };
+    setServerProviderFactory(async () => provider);
+    const meals = await requestRun('Plan dinners for this week and add the groceries');
+    expect(meals.ok).toBe(true);
+    if (!meals.ok) return;
+    expect(meals.approvalId).toEqual(expect.any(String));
+    expect(meals.summary).toContain('List dinners');
+  });
+});
+
+describe('forget', () => {
+  it('names the fact a yes would remove', async () => {
+    await addMemory('Mia is allergic to peanuts', ['allergy'], 'ui');
+    const pending = await forget('peanuts');
+    expect(pending.ok).toBe(true);
+    if (!pending.ok) return;
+    expect(pending.summary).toBe('Forget that Mia is allergic to peanuts? Say yes or no.');
+    expect(pending.approvalId).toEqual(expect.any(String));
+  });
+});
+
+describe('askAgora timeout', () => {
+  it('uses about 4 seconds for Alexa and 9 seconds for the simulator', () => {
+    expect(askTimeoutMs('alexa')).toBe(4_000);
+    expect(askTimeoutMs('simulator')).toBe(9_000);
+  });
+
+  it('answers from memory when the model does not finish in time', async () => {
+    await addMemory('Mia is allergic to peanuts', ['allergy'], 'ui');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const pending = askAgora('What is Mia allergic to?', {
+        timeoutMs: 4_000,
+        create: () => new Promise(() => {}),
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(3_999);
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const answer = await pending;
+      expect(answer.ok).toBe(true);
+      if (!answer.ok) return;
+      expect(answer.speech).toContain('peanuts');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps waiting on the simulator budget past 4 seconds', async () => {
+    await addMemory('Mia is allergic to peanuts', ['allergy'], 'ui');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let answered = false;
+      const pending = askAgora('What is Mia allergic to?', {
+        timeoutMs: 9_000,
+        create: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 5_000));
+          answered = true;
+          return { stop_reason: 'end_turn', content: [{ type: 'text', text: 'From the model.' }] };
+        },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(answered).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const answer = await pending;
+      expect(answered).toBe(true);
+      expect(answer.ok).toBe(true);
+      if (!answer.ok) return;
+      expect(answer.speech).toContain('From the model');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

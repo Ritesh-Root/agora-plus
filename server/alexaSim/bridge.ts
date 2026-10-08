@@ -4,6 +4,7 @@ import type { BedrockCreateParams } from '../llm/bedrockProvider';
 import { getBedrock } from '../llm/serverProvider';
 import { runToolLoop, type ToolCreate, type ToolCreateParams, type ToolCreateResult, type ToolDefinition } from '../llm/toolLoop';
 import { acknowledge } from './ack';
+import { PLAIN_APPROVAL, qualifiedApproval } from './approvalWords';
 import { openConversation, saveConversation, type Conversation, type StoredTool } from './conversation';
 import { fastPathEnabled, routeFast, type FastRoute } from './fastPath';
 import { alexaModelName, bearerFetch, selfBase, tokensForTurn } from './oauthClient';
@@ -62,7 +63,7 @@ async function bedrockCreate(params: ToolCreateParams): Promise<ToolCreateResult
     system: params.system,
     tools: params.tools as BedrockCreateParams['tools'],
     messages: params.messages as BedrockCreateParams['messages'],
-  });
+  }, { timeout: 20_000, maxRetries: 0, signal: params.signal });
   return { stop_reason: message.stop_reason, content: message.content };
 }
 
@@ -100,6 +101,7 @@ interface ParsedTool {
   receipt?: { action?: string; id?: string; verified?: boolean; at?: string };
   approvalId?: string;
   summary?: string;
+  runId?: string;
   forModel: Record<string, unknown>;
 }
 
@@ -120,17 +122,23 @@ function parseTool(result: { isError?: boolean; content?: ReadonlyArray<{ type?:
     }
     : undefined;
   const approvalId = typeof structured.approvalId === 'string' ? structured.approvalId : undefined;
-  const preview = typeof structured.preview === 'string' ? structured.preview : undefined;
-  const forModel: Record<string, unknown> = { speech, status };
-  if (approvalId) forModel.approvalId = approvalId;
-  if (preview) forModel.preview = preview;
-  if (receipt) forModel.receipt = receipt;
+  const summaryText = typeof structured.summary === 'string' && structured.summary.trim()
+    ? structured.summary
+    : typeof structured.preview === 'string' && structured.preview.trim()
+      ? structured.preview
+      : undefined;
+  const runId = typeof structured.runId === 'string' && structured.runId.trim() ? structured.runId : undefined;
+  const forModel: Record<string, unknown> = status === 'needs_approval'
+    ? { status, speech: 'Waiting for a person to say yes or no.' }
+    : { speech, status };
+  if (status !== 'needs_approval' && receipt) forModel.receipt = receipt;
   return {
     speech,
     status,
     ...(receipt ? { receipt } : {}),
     ...(approvalId ? { approvalId } : {}),
-    ...(preview ? { summary: preview } : {}),
+    ...(summaryText ? { summary: summaryText } : {}),
+    ...(runId ? { runId } : {}),
     forModel,
   };
 }
@@ -142,7 +150,7 @@ function asArgs(input: unknown): Record<string, unknown> {
 
 function noteTool(conversation: Conversation, name: string, parsed: ParsedTool): void {
   if (name === 'approve_action') {
-    conversation.pendingApprovalId = undefined;
+    if (parsed.status === 'ok') conversation.pendingApprovalId = undefined;
     return;
   }
   if (parsed.status === 'needs_approval' && parsed.approvalId) {
@@ -150,11 +158,33 @@ function noteTool(conversation: Conversation, name: string, parsed: ParsedTool):
   }
 }
 
+function asksAlready(text: string): boolean {
+  const lower = text.toLowerCase();
+  return lower.includes('should i go ahead') || lower.includes('say yes or no');
+}
+
 function finalSpeech(parsed: ParsedTool): string {
-  const speech = parsed.speech.trim() || 'Done.';
-  if (parsed.status !== 'needs_approval') return speech;
-  if (speech.toLowerCase().includes('should i go ahead')) return speech;
-  return `${speech} Should I go ahead?`;
+  if (parsed.status === 'needs_approval') {
+    const summary = (parsed.summary || parsed.speech).trim();
+    if (!summary) return 'Should I go ahead?';
+    if (asksAlready(summary)) return summary;
+    return `${summary} Should I go ahead?`;
+  }
+  return parsed.speech.trim() || 'Done.';
+}
+
+function scrubVoiceTool(tool: ToolDefinition): ToolDefinition {
+  if (!tool.description || !/approve_action/i.test(tool.description)) return tool;
+  return {
+    ...tool,
+    description: tool.description.replace(/Call approve_action[^.]*\./gi, 'A person has to say yes or no.'),
+  };
+}
+
+function voiceTools(tools: StoredTool[]): ToolDefinition[] {
+  return toAnthropicTools(tools)
+    .filter((tool) => tool.name !== 'approve_action')
+    .map(scrubVoiceTool);
 }
 
 function appendPlain(conversation: Conversation, user: string, assistant: string): void {
@@ -184,6 +214,7 @@ async function speakFast(options: {
   utterance: string;
   ackMs: number;
   started: number;
+  signal: AbortSignal;
   detached: () => boolean;
   write: (event: string, data: unknown) => void;
 }): Promise<void> {
@@ -191,17 +222,22 @@ async function speakFast(options: {
   const toolStarted = Date.now();
   const firstToolMs = toolStarted - started;
   write('tool_call', { name: route.tool, input: route.args });
-  const finish = (text: string) => {
+  const finish = (text: string, runId?: string) => {
     if (options.detached()) return;
     appendPlain(conversation, utterance, text);
     write('final', {
       text,
       conversationId: conversation.id,
+      ...(runId ? { runId } : {}),
       timings: { ackMs, firstToolMs, totalMs: Date.now() - started, route: 'fast' },
     });
   };
   try {
-    const result = await client.callTool({ name: route.tool, arguments: route.args });
+    if (options.signal.aborted) return;
+    const result = await client.callTool(
+      { name: route.tool, arguments: route.args },
+      { signal: options.signal },
+    );
     if (options.detached()) return;
     const parsed = parseTool(result);
     noteTool(conversation, route.tool, parsed);
@@ -212,7 +248,7 @@ async function speakFast(options: {
         summary: parsed.summary || parsed.speech,
       });
     }
-    finish(finalSpeech(parsed));
+    finish(finalSpeech(parsed), parsed.runId);
   } catch {
     if (options.detached()) return;
     const speech = 'That did not work.';
@@ -243,8 +279,12 @@ export async function streamAlexaTurn(
   const started = Date.now();
   let detached = false;
   let finished = false;
+  const abort = new AbortController();
   const onClose = () => {
-    if (!finished) detached = true;
+    if (!finished) {
+      detached = true;
+      abort.abort();
+    }
   };
   res.on('close', onClose);
 
@@ -273,6 +313,17 @@ export async function streamAlexaTurn(
   let client: Client | null = null;
   let transport: StreamableHTTPClientTransport | null = null;
   try {
+    if (conversation.pendingApprovalId && qualifiedApproval(utterance)) {
+      const text = PLAIN_APPROVAL;
+      appendPlain(conversation, utterance, text);
+      write('final', {
+        text,
+        conversationId: conversation.id,
+        timings: { ackMs, totalMs: Date.now() - started, route: 'fast' },
+      });
+      return;
+    }
+
     const base = selfBase(req);
     const tokens = await tokensForTurn(base);
     if (!tokens) {
@@ -299,6 +350,7 @@ export async function streamAlexaTurn(
           utterance,
           ackMs,
           started,
+          signal: abort.signal,
           detached: () => detached,
           write,
         });
@@ -308,45 +360,65 @@ export async function streamAlexaTurn(
 
     const listed = await client.listTools();
     if (!conversation.tools) {
-      conversation.mcpTools = storeTools(listed.tools);
-      conversation.tools = toAnthropicTools(conversation.mcpTools);
+      const listedTools = listed.tools.filter((tool) => tool.name !== 'approve_action');
+      conversation.mcpTools = storeTools(listedTools);
+      conversation.tools = voiceTools(conversation.mcpTools);
     }
-    const tools = conversation.tools;
-    if (!tools) throw new Error('The household tools could not be listed.');
+    const tools = voiceTools(conversation.mcpTools ?? []);
+    if (tools.length === 0) throw new Error('The household tools could not be listed.');
 
     let firstToolMs: number | undefined;
+    let spoken: string | undefined;
+    let startedRunId: string | undefined;
     const history = conversation.messages.map((message) => ({ role: message.role, content: message.content }));
     history.push({ role: 'user', content: utterance });
 
     try {
       const loop = await runToolLoop({
         create: (params) => {
-          if (detached) return Promise.reject(new Error('disconnected'));
-          return (modelOverride ?? bedrockCreate)(params);
+          if (detached || abort.signal.aborted) return Promise.reject(new Error('disconnected'));
+          return (modelOverride ?? bedrockCreate)({ ...params, signal: abort.signal });
         },
         model: alexaModelName(),
         system: conversation.system,
         tools,
         messages: history,
         maxTokens: 400,
+        signal: abort.signal,
+        haltWhen: (value) => {
+          if (!value || typeof value !== 'object') return false;
+          const record = value as { status?: unknown; halt?: unknown };
+          return record.status === 'needs_approval' || record.halt === true;
+        },
         execute: async (name, toolInput) => {
-          if (detached) throw new Error('disconnected');
+          if (detached || abort.signal.aborted) throw new Error('disconnected');
           const startedTool = Date.now();
+          if (name === 'approve_action') {
+            const speech = 'A person has to say yes or no.';
+            spoken = speech;
+            write('tool_result', { name, status: 'error', speech, ms: Date.now() - startedTool });
+            return { speech, status: 'error', halt: true };
+          }
           try {
-            const result = await connected.callTool({ name, arguments: asArgs(toolInput) });
+            const result = await connected.callTool(
+              { name, arguments: asArgs(toolInput) },
+              { signal: abort.signal },
+            );
             const parsed = parseTool(result);
             const ms = Date.now() - startedTool;
             noteTool(conversation, name, parsed);
             write('tool_result', toolPayload(name, parsed, ms));
             if (parsed.status === 'needs_approval' && parsed.approvalId) {
+              spoken = finalSpeech(parsed);
               write('approval_required', {
                 approvalId: parsed.approvalId,
                 summary: parsed.summary || parsed.speech,
               });
             }
+            if (parsed.runId) startedRunId = parsed.runId;
             return parsed.forModel;
           } catch (error) {
-            if (detached) throw error;
+            if (detached || abort.signal.aborted) throw error;
             const ms = Date.now() - startedTool;
             const speech = 'That did not work.';
             write('tool_result', { name, status: 'error', speech, ms });
@@ -363,8 +435,9 @@ export async function streamAlexaTurn(
       if (!detached) {
         saveConversation(conversation, loop.messages);
         write('final', {
-          text: loop.text.trim() || 'Done.',
+          text: spoken || loop.text.trim() || 'Done.',
           conversationId: conversation.id,
+          ...(startedRunId ? { runId: startedRunId } : {}),
           timings: {
             ackMs,
             ...(firstToolMs !== undefined ? { firstToolMs } : {}),

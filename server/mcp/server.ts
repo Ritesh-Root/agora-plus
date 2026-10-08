@@ -13,6 +13,7 @@ import * as z from 'zod/v4';
 import {
   addTask,
   askAgora,
+  askTimeoutMs,
   completeTask,
   dailyBriefing,
   forget,
@@ -206,7 +207,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       if (message) return fail(message);
       if (!pending.ok) return fail('That memory could not be queued.');
       return result({
-        speech: 'I need a yes before I forget that.',
+        speech: pending.summary,
         status: 'needs_approval',
         approvalId: pending.approvalId,
         summary: pending.summary,
@@ -334,7 +335,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     'plan_and_run',
     {
       title: 'Plan and wait',
-      description: 'Call when someone wants the household team to plan a goal, such as a week of meals. It does not start the team. It returns needs_approval, an approvalId, and a preview that lists the planned steps. Call approve_action before anything runs.',
+      description: 'Call when someone wants the household team to plan a goal, such as a week of meals. It does not start the team. It returns needs_approval, an approvalId, and a preview that lists the planned steps. Call approve_action before anything runs. If the goal is an order, a purchase, a booking, a payment, or a phone call, it refuses.',
       inputSchema: z.object({
         goal: z.string().describe('What the household wants planned.'),
       }),
@@ -426,7 +427,11 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
             ? 'That approval has expired. Ask again.'
             : reason === 'resolved'
               ? 'That approval was already resolved.'
-              : 'That action failed.';
+              : reason === 'running'
+                ? 'That is already running.'
+                : reason.trim() && !/secret|token|bearer|akia/i.test(reason)
+                  ? reason.slice(0, 240)
+                  : 'That action failed.';
         return fail(speech);
       }
       if (decision === 'reject') {
@@ -473,7 +478,8 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       annotations: readOnly,
     },
     async ({ question }) => {
-      const answer = await askAgora(question);
+      const caller = server.server.getClientVersion()?.name === 'agora-plus-voice' ? 'simulator' : 'alexa';
+      const answer = await askAgora(question, { timeoutMs: askTimeoutMs(caller) });
       const message = errorOf(answer);
       if (message) return fail(message);
       if (!answer.ok) return fail('I could not answer that.');

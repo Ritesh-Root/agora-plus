@@ -1,6 +1,6 @@
 import type { Message } from '@anthropic-ai/sdk/resources/messages';
 import { describe, expect, it } from 'vitest';
-import { createBedrockProvider, type BedrockClient } from './bedrockProvider';
+import { createBedrockProvider, PREVIEW_TIMEOUT_MS, SWARM_TIMEOUT_MS, type BedrockClient } from './bedrockProvider';
 
 function message(text: string, extra: Partial<Message> = {}): Message {
   return {
@@ -134,5 +134,30 @@ describe('bedrock provider', () => {
       [{ role: 'user', content: 'hi' }],
     )).rejects.toThrow('The model declined this request.');
     expect(provider.takeUsage()).toMatchObject({ calls: 1, promptTokens: 11, completionTokens: 7, missingUsage: 0 });
+  });
+
+  it('bounds preview and summary calls shorter than swarm workers', async () => {
+    const seen: { timeout?: number; maxRetries?: number }[] = [];
+    const client: BedrockClient = {
+      messages: {
+        create: async (_params, options) => {
+          seen.push({ timeout: options?.timeout, maxRetries: options?.maxRetries });
+          return message('ok');
+        },
+      },
+    };
+    const provider = createBedrockProvider({ client, model: 'anthropic.claude-sonnet-5' });
+    provider.prepareRequest({ stage: 'planning', agent: 'Agora', attempt: 1 });
+    await provider.generateCompletion([{ role: 'user', content: 'plan' }]);
+    provider.prepareRequest({ stage: 'summary', agent: 'Agora', attempt: 1 });
+    await provider.generateCompletion([{ role: 'user', content: 'speak' }]);
+    provider.prepareRequest({ stage: 'worker', agent: 'Scout', attempt: 1 });
+    await provider.generateCompletion([{ role: 'user', content: 'work' }]);
+    expect(seen[0]).toEqual({ timeout: PREVIEW_TIMEOUT_MS, maxRetries: 0 });
+    expect(seen[1]).toEqual({ timeout: PREVIEW_TIMEOUT_MS, maxRetries: 0 });
+    expect(seen[2]?.timeout).toBe(SWARM_TIMEOUT_MS);
+    expect(seen[2]?.maxRetries).toBe(1);
+    expect(SWARM_TIMEOUT_MS).toBeGreaterThan(PREVIEW_TIMEOUT_MS);
+    expect(SWARM_TIMEOUT_MS).toBeLessThan(10 * 60 * 1000);
   });
 });

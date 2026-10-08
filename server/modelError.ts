@@ -16,6 +16,15 @@ export function publicModelError(error: unknown): string {
     return 'That model is not available.';
   }
   if (
+    text.includes('429') ||
+    text.includes('throttl') ||
+    text.includes('too many requests') ||
+    text.includes('rate limit') ||
+    text.includes('rate_limit')
+  ) {
+    return 'The model is busy right now. Try again in a moment.';
+  }
+  if (
     text.includes('invalid_api_key') ||
     text.includes('invalid api-key') ||
     text.includes('invalid api key') ||

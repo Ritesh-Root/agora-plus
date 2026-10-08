@@ -90,13 +90,13 @@ describe('routeFast', () => {
 
   it('approves only while an approval is waiting', () => {
     const pending = { pendingApprovalId: 'ap-1' };
-    for (const utterance of ['yes', 'Yeah!', 'yep', 'go ahead', 'do it', 'approve']) {
+    for (const utterance of ['yes', 'Yeah!', 'yep', 'go ahead', 'do it', 'approve', 'Yes, go ahead.', 'sure', 'okay, go ahead']) {
       expect(routeFast(utterance, pending)).toEqual({
         tool: 'approve_action',
         args: { approvalId: 'ap-1', decision: 'approve' },
       });
     }
-    for (const utterance of ['no', 'nope', 'cancel', "don't"]) {
+    for (const utterance of ['no', 'nope', 'cancel', "don't", 'stop', 'No, cancel that.']) {
       expect(routeFast(utterance, pending)).toEqual({
         tool: 'approve_action',
         args: { approvalId: 'ap-1', decision: 'reject' },
@@ -105,6 +105,9 @@ describe('routeFast', () => {
     expect(routeFast('yes', none)).toBeNull();
     expect(routeFast('no', none)).toBeNull();
     expect(routeFast('go ahead', none)).toBeNull();
+    expect(routeFast('yes but not Tuesday', pending)).toBeNull();
+    expect(routeFast('yesterday', pending)).toBeNull();
+    expect(routeFast('cancel that', pending)).toBeNull();
   });
 
   it('leaves compounds and open questions for the model', () => {

@@ -14,6 +14,19 @@ const DEFAULT_FAST_MODEL = 'anthropic.claude-haiku-4-5';
 const COMPLETION_TOKENS = 8000;
 const DECLINED = 'The model declined this request.';
 
+/** Preview and the spoken summary. One attempt, about 20 seconds. */
+export const PREVIEW_TIMEOUT_MS = 20_000;
+/** Swarm workers stay longer than a preview, and well under the SDK's 10 minutes. */
+export const SWARM_TIMEOUT_MS = 90_000;
+
+const SWARM_STAGES = new Set(['worker', 'assembling', 'repair', 'repairing', 'debate', 'working']);
+
+export interface BedrockCallOptions {
+  timeout?: number;
+  maxRetries?: number;
+  signal?: AbortSignal;
+}
+
 export interface BedrockCreateParams {
   model: string;
   max_tokens: number;
@@ -25,14 +38,14 @@ export interface BedrockCreateParams {
 /** Enough of messages.create for tests to inject. The real client is AnthropicBedrockMantle. */
 export interface BedrockClient {
   messages: {
-    create: (params: MessageCreateParamsNonStreaming) => Promise<Message>;
+    create: (params: MessageCreateParamsNonStreaming, options?: BedrockCallOptions) => Promise<Message>;
   };
 }
 
 export interface BedrockProvider extends ServerProvider {
   readonly model: string;
   readonly fastModel: string;
-  createMessage(params: BedrockCreateParams): Promise<Message>;
+  createMessage(params: BedrockCreateParams, options?: BedrockCallOptions): Promise<Message>;
 }
 
 function envModel(name: string | undefined, fallback: string): string {
@@ -106,14 +119,28 @@ export function createBedrockProvider(options?: {
   const model = envModel(options?.model, envModel(process.env.BEDROCK_MODEL, DEFAULT_MODEL));
   const fastModel = envModel(options?.fastModel, envModel(process.env.BEDROCK_FAST_MODEL, DEFAULT_FAST_MODEL));
   const region = options?.region || process.env.AWS_REGION || 'us-east-1';
-  const client = options?.client ?? new AnthropicBedrockMantle({ awsRegion: region });
+  const client = options?.client ?? new AnthropicBedrockMantle({
+    awsRegion: region,
+    timeout: SWARM_TIMEOUT_MS,
+    maxRetries: 1,
+  });
   const usage: RunUsage = { calls: 0, promptTokens: 0, completionTokens: 0, missingUsage: 0 };
   const request = { runId: '-', stage: 'call', agent: '-', attempt: 1 };
 
-  async function create(params: MessageCreateParamsNonStreaming): Promise<Message> {
+  function limitsFor(stage: string): { timeout: number; maxRetries: number } {
+    if (SWARM_STAGES.has(stage)) return { timeout: SWARM_TIMEOUT_MS, maxRetries: 1 };
+    return { timeout: PREVIEW_TIMEOUT_MS, maxRetries: 0 };
+  }
+
+  async function create(params: MessageCreateParamsNonStreaming, call?: BedrockCallOptions): Promise<Message> {
     usage.calls += 1;
+    const limits = limitsFor(request.stage);
     try {
-      const message = await client.messages.create(params);
+      const message = await client.messages.create(params, {
+        timeout: call?.timeout ?? limits.timeout,
+        maxRetries: call?.maxRetries ?? limits.maxRetries,
+        ...(call?.signal ? { signal: call.signal } : {}),
+      });
       noteUsage(usage, message.usage);
       return message;
     } catch (error) {
@@ -135,7 +162,7 @@ export function createBedrockProvider(options?: {
       return { ...usage };
     },
     /** Raw Messages result, including a refusal. The tool loop decides what to do with stop_reason. */
-    async createMessage(params) {
+    async createMessage(params, call) {
       const body: MessageCreateParamsNonStreaming = {
         model: pickModel(params.model, model),
         max_tokens: params.max_tokens,
@@ -143,7 +170,7 @@ export function createBedrockProvider(options?: {
       };
       if (params.system) body.system = params.system;
       if (params.tools && params.tools.length > 0) body.tools = params.tools;
-      return create(body);
+      return create(body, call);
     },
     async generateCompletion(messages, _tools, systemInstruction, modelName) {
       const prepared = toAnthropicMessages(messages, systemInstruction);

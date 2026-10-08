@@ -17,6 +17,7 @@ describe('conversation store', () => {
     expect(expired.id).not.toBe(first.id);
     expect(expired.messages).toEqual([]);
     expect(expired.system).toBe(VOICE_SYSTEM);
+    expect(VOICE_SYSTEM.toLowerCase()).not.toContain('approve_action');
   });
 
   it('starts a new conversation with a short summary after 40 messages', () => {
