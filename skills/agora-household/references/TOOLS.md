@@ -111,7 +111,7 @@ Call for the morning household briefing. It is built from due tasks, waiting app
 
 Input: none.
 
-Output: `speech`, `status`, `items` (string[], the briefing lines), `suggestions` (string[]).
+Output: `speech`, `status`, `items` (string[], the briefing lines), `suggestions` (string[]), and `approvals` (`id`, `summary`) for a screen. The spoken line is still only `speech`. `daily_briefing` and `list_tasks` link a screen card at `ui://daily_briefing/household-card.html`.
 
 ## plan_and_run
 

@@ -232,6 +232,7 @@ describe('MCP endpoint', () => {
     const briefing = await connected.callTool({ name: 'daily_briefing', arguments: {} });
     expect(briefing.isError).toBeUndefined();
     expect(typeof structured(briefing).speech).toBe('string');
+    expect(Array.isArray(structured(briefing).approvals)).toBe(true);
     expect(String((briefing.content[0] as { text?: string }).text ?? '').length).toBeGreaterThan(0);
 
     const status = await connected.callTool({ name: 'get_run_status', arguments: {} });
@@ -265,4 +266,26 @@ describe('MCP endpoint', () => {
     expect(answer.isError).toBeUndefined();
     expect(String((answer.content[0] as { text?: string }).text ?? '')).toContain('peanuts');
   });
+
+  it('serves the household card and links it from the briefing', async () => {
+    const connected = await connect('dev-token');
+    const uri = 'ui://daily_briefing/household-card.html';
+    const listed = await connected.listResources();
+    const card = listed.resources.find((resource) => resource.uri === uri);
+    expect(card?.mimeType).toBe('text/html;profile=mcp-app');
+    const read = await connected.readResource({ uri });
+    const html = read.contents[0]?.text ?? '';
+    expect(read.contents[0]?.mimeType).toBe('text/html;profile=mcp-app');
+    expect(html).toContain('<script>');
+    expect(html).toContain('complete_task');
+    expect(html).toContain('approve_action');
+    expect(html).not.toContain('fonts.googleapis');
+    const tools = await connected.listTools();
+    const briefing = tools.tools.find((tool) => tool.name === 'daily_briefing');
+    const tasks = tools.tools.find((tool) => tool.name === 'list_tasks');
+    const meta = briefing?._meta as { ui?: { resourceUri?: string } } | undefined;
+    const taskMeta = tasks?._meta as { ui?: { resourceUri?: string } } | undefined;
+    expect(meta?.ui?.resourceUri).toBe(uri);
+    expect(taskMeta?.ui?.resourceUri).toBe(uri);
+  }, 20000);
 });

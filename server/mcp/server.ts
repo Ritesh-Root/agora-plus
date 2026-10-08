@@ -1,4 +1,9 @@
 import {
+  registerAppResource,
+  registerAppTool,
+  RESOURCE_MIME_TYPE,
+} from '@modelcontextprotocol/ext-apps/server';
+import {
   McpServer,
   ResourceNotFoundError,
   ResourceTemplate,
@@ -19,15 +24,17 @@ import {
   webResearch,
   type Receipt,
 } from '../household/actions';
-import { resolveApproval } from '../household/approvals';
+import { listPendingApprovals, resolveApproval } from '../household/approvals';
 import { memoryMarkdown } from '../household/memoryStore';
 import { toSpeech } from '../household/speech';
 import { getRunRecord, listRecentRuns } from '../runEngine';
+import { HOUSEHOLD_CARD_URI, loadHouseholdCardHtml } from './apps/cardHtml';
 
 const INSTRUCTIONS = [
   'AGORA+ is a self-hosted household brain. It remembers facts, keeps tasks, and plans work with a small team.',
   'Forgetting a memory or starting a plan does not happen immediately. The tool returns needs_approval and an approvalId. Call approve_action with that id and decision approve or reject.',
   'Spoken replies are short. Receipts and lists are in the structured result.',
+  'Screens that support it can show a household card for the briefing and the task list. Speak the speech field either way.',
 ].join(' ');
 
 const receiptSchema = z.object({
@@ -105,6 +112,8 @@ function taskView(tasks: { id: string; title: string; status: 'open' | 'done'; d
     return view;
   });
 }
+
+const cardUi = { ui: { resourceUri: HOUSEHOLD_CARD_URI } };
 
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const writeSafe = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
@@ -230,7 +239,8 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     },
   );
 
-  server.registerTool(
+  registerAppTool(
+    server,
     'list_tasks',
     {
       title: 'List tasks',
@@ -238,6 +248,7 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       inputSchema: z.object({
         status: z.enum(['open', 'done']).optional().describe('Filter to open or done. Leave empty for both.'),
       }),
+      _meta: cardUi,
       outputSchema: toolOutput({
         tasks: z.array(z.object({
           id: z.string(),
@@ -286,7 +297,8 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
     },
   );
 
-  server.registerTool(
+  registerAppTool(
+    server,
     'daily_briefing',
     {
       title: 'Daily briefing',
@@ -295,8 +307,13 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       outputSchema: toolOutput({
         items: z.array(z.string()).optional(),
         suggestions: z.array(z.string()).optional(),
+        approvals: z.array(z.object({
+          id: z.string(),
+          summary: z.string(),
+        })).optional().describe('Waiting approvals a screen can approve or decline. The spoken reply does not read the ids.'),
       }),
       annotations: readOnly,
+      _meta: cardUi,
     },
     async () => {
       const briefing = await dailyBriefing();
@@ -305,6 +322,10 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
         status: 'ok',
         items: briefing.items,
         suggestions: briefing.suggestions,
+        approvals: listPendingApprovals().map((action) => ({
+          id: action.id,
+          summary: action.summary,
+        })),
       });
     },
   );
@@ -480,6 +501,23 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
       if (!looked.ok) return fail(looked.speech || looked.error);
       return result({ speech: looked.speech, status: 'ok' });
     },
+  );
+
+  registerAppResource(
+    server,
+    'household-card',
+    HOUSEHOLD_CARD_URI,
+    {
+      description: 'Interactive household briefing for a screen. It lists the day, open tasks, and waiting approvals.',
+      _meta: { ui: { prefersBorder: true } },
+    },
+    async (uri) => ({
+      contents: [{
+        uri: uri.href,
+        mimeType: RESOURCE_MIME_TYPE,
+        text: await loadHouseholdCardHtml(),
+      }],
+    }),
   );
 
   server.registerResource(

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Household</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #17150f;
+    --paper: #fcfaf4;
+    --butter: #f2cc46;
+    --muted: #665e4b;
+    --line: #ded7c4;
+    --safe-top: 0px;
+    --safe-right: 0px;
+    --safe-bottom: 0px;
+    --safe-left: 0px;
+  }
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --ink: #fcfaf4;
+    --paper: #17150f;
+    --butter: #f2cc46;
+    --muted: #b3aa8f;
+    --line: #3e3a2e;
+  }
+  * { box-sizing: border-box; }
+  html { font-size: 18px; }
+  body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--color-background-primary, var(--paper));
+    color: var(--color-text-primary, var(--ink));
+    font-family: var(--font-sans, system-ui, sans-serif);
+    font-size: 1rem;
+    line-height: 1.45;
+    padding:
+      calc(16px + var(--safe-top))
+      calc(16px + var(--safe-right))
+      calc(20px + var(--safe-bottom))
+      calc(16px + var(--safe-left));
+  }
+  main { max-width: 40rem; }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 1.35rem;
+    line-height: 1.2;
+    font-weight: 760;
+  }
+  h2 {
+    margin: 22px 0 8px;
+    font-size: 1rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary, var(--muted));
+  }
+  #speech { margin: 0; font-size: 1.15rem; }
+  #note {
+    min-height: 1.45rem;
+    margin: 12px 0 0;
+    color: var(--color-text-secondary, var(--muted));
+  }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-border-primary, var(--line));
+  }
+  li p { flex: 1 1 12rem; margin: 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    font: inherit;
+    font-size: 1rem;
+    min-height: 48px;
+    min-width: 48px;
+    padding: 12px 20px;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:focus-visible {
+    outline: 3px solid var(--color-ring-primary, var(--butter));
+    outline-offset: 2px;
+  }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.primary {
+    background: var(--color-background-info, var(--butter));
+    color: var(--color-text-info, #17150f);
+  }
+  button.quiet {
+    background: transparent;
+    color: var(--color-text-primary, var(--ink));
+    border-color: var(--color-border-primary, var(--line));
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Household</h1>
+  <p id="speech">Loading the household…</p>
+  <section>
+    <h2>Briefing</h2>
+    <ul id="items"></ul>
+  </section>
+  <section>
+    <h2>Open tasks</h2>
+    <ul id="tasks"></ul>
+  </section>
+  <section>
+    <h2>Waiting for a yes</h2>
+    <ul id="approvals"></ul>
+  </section>
+  <p id="note" role="status"></p>
+</main>
+<!--AGORA_CARD_SCRIPT-->
+</body>
+</html>

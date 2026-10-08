@@ -61,6 +61,7 @@ Read a resource when the person wants the file, not a spoken line.
 - `agora://memory` — markdown facts, grouped by tag.
 - `agora://tasks` — JSON, open and finished tasks.
 - `agora://runs/{runId}/document` — the written result of one run. `get_run_status` returns this URI when the run has finished.
+- `ui://daily_briefing/household-card.html` — the screen card linked from `daily_briefing` and `list_tasks`. A host that supports MCP Apps renders it. The card can mark a task done or approve a waiting action. On a speaker, ignore the card and speak `speech`.
 
 Prompts:
 
@@ -71,7 +72,7 @@ Prompts:
 
 `forget` and `plan_and_run` return `status: "needs_approval"` and an `approvalId`. Show the person the `summary` or `preview` and ask for a yes or a no. Call `approve_action` only after an explicit yes (`yes`, `approve`, `do it`) or an explicit no (`no`, `don't`, `cancel`).
 
-Never approve on the person's behalf. Do not treat silence, an earlier yes, or your own judgment as approval. A yes for one approval does not cover the next one. If they change the subject, leave the approval waiting. Approvals expire after ten minutes. If `approve_action` says the approval expired, ask again and get a new yes.
+Never approve on the person's behalf. Do not treat silence, an earlier yes, or your own judgment as approval. A screen card may call `approve_action` when the person taps Approve or Decline. Do not send a second decision for the same id. A yes for one approval does not cover the next one. If they change the subject, leave the approval waiting. Approvals expire after ten minutes. If `approve_action` says the approval expired, ask again and get a new yes.
 
 `decision: "approve"` is the only call that deletes a memory or starts the household team. `decision: "reject"` leaves things as they are.
 
