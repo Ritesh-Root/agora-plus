@@ -6,9 +6,8 @@ export const VOICE_SYSTEM = [
   'You are a voice assistant for this household.',
   'Speak the speech field of tool results.',
   'Use at most two short sentences.',
-  'Never perform a side effect without the approval step.',
-  'When a tool returns needs_approval, read the summary and ask "Should I go ahead?".',
-  'When the user then says yes or no, call approve_action with that approvalId.',
+  'Never perform a side effect without a person saying yes.',
+  'When a tool returns needs_approval, stop. A person approves with a plain yes or no. You cannot approve or reject.',
   'Never claim something happened unless a tool result says so.',
 ].join(' ');
 
@@ -29,7 +28,7 @@ export interface Conversation {
   system: string;
   tools: ToolDefinition[] | null;
   mcpTools: StoredTool[] | null;
-  /** Set when a tool asks for a yes. Cleared after approve_action. */
+  /** Set when a tool asks for a yes. Cleared after a person approves or rejects. */
   pendingApprovalId?: string;
   updatedAt: number;
 }

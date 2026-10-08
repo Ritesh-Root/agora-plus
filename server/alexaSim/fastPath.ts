@@ -1,3 +1,5 @@
+import { approvalDecision } from './approvalWords';
+
 /**
  * Rule router for commands that do not need a model.
  * A match still runs through MCP. Anything ambiguous returns null.
@@ -8,8 +10,6 @@ export interface FastRoute {
   args: Record<string, unknown>;
 }
 
-const APPROVE = new Set(['yes', 'yeah', 'yep', 'go ahead', 'do it', 'approve', 'yes, go ahead', 'yes go ahead']);
-const REJECT = new Set(['no', 'nope', 'cancel', "don't", 'dont', 'no, cancel', 'no, cancel that']);
 const BRIEFING = new Set(["what's my briefing", 'whats my briefing', 'brief me', "what's on today", 'whats on today', 'good morning']);
 const LIST = new Set(["what's on my list", 'whats on my list', 'what are my tasks', 'list my tasks']);
 
@@ -60,10 +60,9 @@ function exact(text: string, phrases: Set<string>, tool: string): FastRoute | nu
 
 function approval(text: string, pendingApprovalId: string | undefined): FastRoute | null {
   if (!pendingApprovalId) return null;
-  const folded = fold(text);
-  if (APPROVE.has(folded)) return { tool: 'approve_action', args: { approvalId: pendingApprovalId, decision: 'approve' } };
-  if (REJECT.has(folded)) return { tool: 'approve_action', args: { approvalId: pendingApprovalId, decision: 'reject' } };
-  return null;
+  const decision = approvalDecision(text);
+  if (!decision) return null;
+  return { tool: 'approve_action', args: { approvalId: pendingApprovalId, decision } };
 }
 
 /** Every command this utterance matches. More than one means it is not unambiguous. */
@@ -103,8 +102,7 @@ function commandsOne(text: string): FastRoute | null {
 export function routeFast(utterance: string, conversation: { pendingApprovalId?: string }): FastRoute | null {
   const text = stripTrailing(utterance);
   if (!text) return null;
-  const decided = approval(text, conversation.pendingApprovalId);
-  if (APPROVE.has(fold(text)) || REJECT.has(fold(text))) return decided;
+  if (approvalDecision(text)) return approval(text, conversation.pendingApprovalId);
   const found = commands(text);
   return found.length === 1 ? found[0] : null;
 }

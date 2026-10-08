@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 
 export type ApprovalKind = 'forget' | 'start_run';
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
+export type ApprovalStatus = 'pending' | 'running' | 'approved' | 'rejected' | 'expired';
 
 export interface PendingAction {
   id: string;
@@ -69,21 +69,40 @@ export async function resolveApproval(
   if (!action) return { ok: false, error: 'missing' };
   expireIfNeeded(action, now);
   if (action.status === 'expired') return { ok: false, error: 'expired', approval: action };
+  if (action.status === 'running') return { ok: false, error: 'running', approval: action };
   if (action.status !== 'pending') return { ok: false, error: 'resolved', approval: action };
   if (decision === 'reject') {
     action.status = 'rejected';
     return { ok: true, approval: action };
   }
-  action.status = 'approved';
   const handler = handlers.get(action.kind);
-  if (!handler) return { ok: true, approval: action };
+  if (!handler) {
+    action.status = 'approved';
+    return { ok: true, approval: action };
+  }
+  // Claim the approval before the await so a second yes cannot run the action twice.
+  action.status = 'running';
   try {
     const result = await handler(action.payload);
+    const failure = failedResult(result);
+    if (failure) {
+      action.status = 'pending';
+      return { ok: false, error: failure, approval: action };
+    }
+    action.status = 'approved';
     return { ok: true, approval: action, result };
   } catch (error) {
+    action.status = 'pending';
     const message = error instanceof Error ? error.message : 'The action failed.';
     return { ok: false, error: message, approval: action };
   }
+}
+
+function failedResult(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null;
+  const record = result as { ok?: unknown; error?: unknown };
+  if (record.ok !== false) return null;
+  return typeof record.error === 'string' && record.error.trim() ? record.error : 'The action failed.';
 }
 
 export function listPendingApprovals(now: () => Date = () => new Date()): PendingAction[] {

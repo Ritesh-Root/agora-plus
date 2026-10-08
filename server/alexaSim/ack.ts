@@ -1,3 +1,5 @@
+import { approvalDecision, PLAIN_APPROVAL, qualifiedApproval } from './approvalWords';
+
 /**
  * Spoken acknowledgement before any model or network call.
  * The phrase is chosen by fixed word rules, in this order.
@@ -9,6 +11,7 @@ export const ACK_PHRASES = [
   "Here's your day.",
   'Okay, going ahead.',
   "Okay, I won't.",
+  PLAIN_APPROVAL,
   'Let me check.',
   'On it.',
 ] as const;
@@ -35,8 +38,10 @@ export function acknowledge(utterance: string): string {
   if (has('remember', 'note')) return REMEMBER;
   if (has('plan', 'organize', 'schedule')) return PLAN;
   if (has('briefing', 'today')) return BRIEFING;
-  if (has('yes', 'approve')) return YES;
-  if (has('no', 'cancel')) return NO;
+  const decision = approvalDecision(utterance);
+  if (decision === 'approve') return YES;
+  if (decision === 'reject') return NO;
+  if (qualifiedApproval(utterance)) return PLAIN_APPROVAL;
   if (words.some((word) => QUESTION_WORDS.has(word)) || utterance.includes('?')) return QUESTION;
   return DEFAULT;
 }

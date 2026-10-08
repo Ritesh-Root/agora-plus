@@ -123,4 +123,59 @@ describe('tool loop', () => {
     expect(result.toolCalls).toHaveLength(2);
     expect(result.stopReason).toBe('tool_use');
   });
+
+  it('stops before another model call when a tool asks to halt', async () => {
+    let creates = 0;
+    const result = await runToolLoop({
+      model: 'anthropic.claude-haiku-4-5',
+      system: 'Be brief.',
+      tools,
+      messages: [{ role: 'user', content: 'go' }],
+      haltWhen: (value) => Boolean(value && typeof value === 'object' && (value as { status?: unknown }).status === 'needs_approval'),
+      create: async () => {
+        creates += 1;
+        return {
+          stop_reason: 'tool_use',
+          content: [{ type: 'tool_use', id: 'plan', name: 'recall', input: {} }],
+        };
+      },
+      execute: async () => ({ status: 'needs_approval', speech: 'Waiting for a person to say yes or no.' }),
+    });
+    expect(creates).toBe(1);
+    expect(result.stopReason).toBe('halt');
+    expect(result.toolCalls).toHaveLength(1);
+  });
+
+  it('does not run a tool after the signal aborts', async () => {
+    const abort = new AbortController();
+    let ran = 0;
+    const pending = runToolLoop({
+      model: 'anthropic.claude-haiku-4-5',
+      system: 'Be brief.',
+      tools,
+      messages: [{ role: 'user', content: 'go' }],
+      signal: abort.signal,
+      create: (params) => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          resolve({
+            stop_reason: 'tool_use',
+            content: [{ type: 'tool_use', id: 'late', name: 'recall', input: {} }],
+          });
+        }, 50);
+        const stop = () => {
+          clearTimeout(timer);
+          reject(new Error('disconnected'));
+        };
+        if (params.signal?.aborted) stop();
+        else params.signal?.addEventListener('abort', stop, { once: true });
+      }),
+      execute: async () => {
+        ran += 1;
+        return { memories: [] };
+      },
+    });
+    abort.abort();
+    await expect(pending).rejects.toThrow('disconnected');
+    expect(ran).toBe(0);
+  });
 });

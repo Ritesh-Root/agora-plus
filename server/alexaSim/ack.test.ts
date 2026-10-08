@@ -27,9 +27,13 @@ describe('acknowledge', () => {
     expect(acknowledge("What's my briefing?")).toBe("Here's your day.");
     expect(acknowledge('How does today look?')).toBe("Here's your day.");
     expect(acknowledge('Yes, go ahead.')).toBe('Okay, going ahead.');
-    expect(acknowledge('I approve')).toBe('Okay, going ahead.');
+    expect(acknowledge('sure')).toBe('Okay, going ahead.');
+    expect(acknowledge('I approve')).toBe('I need a plain yes or no.');
+    expect(acknowledge('yes but not Tuesday')).toBe('I need a plain yes or no.');
+    expect(acknowledge('yesterday')).toBe('On it.');
     expect(acknowledge('No, cancel that.')).toBe("Okay, I won't.");
-    expect(acknowledge('cancel that')).toBe("Okay, I won't.");
+    expect(acknowledge('stop')).toBe("Okay, I won't.");
+    expect(acknowledge('cancel that')).toBe('I need a plain yes or no.');
     expect(acknowledge('What is Mia allergic to?')).toBe('Let me check.');
     expect(acknowledge('where are the keys')).toBe('Let me check.');
     expect(acknowledge('Milk?')).toBe('Let me check.');

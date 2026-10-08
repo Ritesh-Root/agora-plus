@@ -26,6 +26,7 @@ export interface ToolCreateParams {
   system?: string;
   tools?: ToolDefinition[];
   messages: LoopMessage[];
+  signal?: AbortSignal;
 }
 
 export interface ToolCreateResult {
@@ -110,6 +111,36 @@ function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
+function disconnected(error: unknown): boolean {
+  return error instanceof Error && (error.message === 'disconnected' || error.name === 'AbortError');
+}
+
+/** Rejects when the signal aborts, without dropping a later failure from `work`. */
+function raceSignal<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) {
+    void work.catch(() => undefined);
+    return Promise.reject(new Error('disconnected'));
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(new Error('disconnected'));
+    };
+    signal.addEventListener('abort', onAbort);
+    work.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 /**
  * Calls the model, runs every tool_use block in parallel, and appends one user
  * message with the tool_result blocks in that same order. Stops on end_turn,
@@ -125,6 +156,9 @@ export async function runToolLoop(options: {
   maxSteps?: number;
   maxTokens?: number;
   onEvent?: (event: ToolLoopEvent) => void;
+  /** When a tool result matches, the loop stops before another model call. */
+  haltWhen?: (value: unknown) => boolean;
+  signal?: AbortSignal;
 }): Promise<ToolLoopResult> {
   const maxSteps = options.maxSteps ?? 4;
   const maxTokens = options.maxTokens ?? 1024;
@@ -138,13 +172,15 @@ export async function runToolLoop(options: {
   let text = '';
 
   while (steps < maxSteps) {
-    const response = await options.create({
+    if (options.signal?.aborted) throw new Error('disconnected');
+    const response = await raceSignal(options.create({
       model: options.model,
       max_tokens: maxTokens,
       system: options.system,
       tools: options.tools,
       messages: history,
-    });
+      signal: options.signal,
+    }), options.signal);
     history.push({ role: 'assistant', content: response.content });
     stopReason = response.stop_reason ?? 'end_turn';
     text = textFrom(response.content);
@@ -154,6 +190,7 @@ export async function runToolLoop(options: {
     if (uses.length === 0) break;
 
     const outcomes = await Promise.all(uses.map(async (call) => {
+      if (options.signal?.aborted) throw new Error('disconnected');
       options.onEvent?.({ type: 'tool_call', name: call.name, input: call.input });
       const started = Date.now();
       try {
@@ -167,8 +204,9 @@ export async function runToolLoop(options: {
           content: clip(serialize(value), 8000),
           is_error: !ok,
         };
-        return { meta: { name: call.name, input: call.input, ok, ms }, block };
+        return { meta: { name: call.name, input: call.input, ok, ms }, block, value };
       } catch (error) {
+        if (disconnected(error) || options.signal?.aborted) throw error;
         const ms = Date.now() - started;
         const message = error instanceof Error && error.message ? error.message : 'The tool failed.';
         options.onEvent?.({ type: 'tool_result', name: call.name, input: call.input, ok: false, ms });
@@ -178,13 +216,17 @@ export async function runToolLoop(options: {
           content: message,
           is_error: true,
         };
-        return { meta: { name: call.name, input: call.input, ok: false, ms }, block };
+        return { meta: { name: call.name, input: call.input, ok: false, ms }, block, value: undefined };
       }
     }));
 
     for (const outcome of outcomes) toolCalls.push(outcome.meta);
     history.push({ role: 'user', content: outcomes.map((outcome) => outcome.block) });
     steps += 1;
+    if (outcomes.some((outcome) => options.haltWhen?.(outcome.value))) {
+      stopReason = 'halt';
+      break;
+    }
   }
 
   return { text, messages: history, stopReason, steps, toolCalls };
