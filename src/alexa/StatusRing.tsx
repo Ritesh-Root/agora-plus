@@ -13,8 +13,12 @@ const RING_CSS = `
 .agora-ring { width: 8.5rem; height: 8.5rem; border-radius: 999px; display: grid; place-items: center; border: 2px solid rgba(252,250,244,0.18); transition: width 200ms ease, height 200ms ease; }
 .agora-ring-core { width: 6.4rem; height: 6.4rem; border-radius: 999px; border: 7px solid #17150f; box-shadow: inset 0 0 0 2px rgba(242,204,70,0.45); background: #17150f; transition: width 200ms ease, height 200ms ease, box-shadow 200ms ease; }
 @media (min-width: 1024px) {
-  .agora-ring { width: 14rem; height: 14rem; }
-  .agora-ring-core { width: 10.5rem; height: 10.5rem; border-width: 10px; }
+  /* Scales with screen height so short laptop screens keep the caption and approval card in view. */
+  .agora-ring { width: clamp(6.5rem, 22dvh, 14rem); height: clamp(6.5rem, 22dvh, 14rem); }
+  .agora-ring-core { width: 75%; height: 75%; border-width: 10px; }
+  /* The approval card needs the room while a yes is pending. */
+  .agora-ring.agora-ring-approval { width: clamp(5rem, 13dvh, 9rem); height: clamp(5rem, 13dvh, 9rem); }
+  .agora-ring-approval .agora-ring-core { border-width: 7px; }
 }
 .agora-ring-listening .agora-ring-core { box-shadow: 0 0 0 7px rgba(242,204,70,0.35); animation: agora-pulse 1.3s ease-in-out infinite; }
 .agora-ring-speaking .agora-ring-core { box-shadow: 0 0 0 6px rgba(242,204,70,0.55); }

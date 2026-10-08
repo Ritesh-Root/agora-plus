@@ -391,7 +391,7 @@ export default function AlexaSimulator() {
           <div className="flex items-center justify-center px-3 pt-3 lg:min-h-0 lg:flex-1 lg:px-6 lg:pt-6">
             <div
               data-testid="alexa-device"
-              className="w-full max-w-full overflow-hidden rounded-[2rem] bg-ink p-2 shadow-[0_24px_60px_-24px_rgba(23,21,15,0.55)] ring-1 ring-ink/10 lg:aspect-[16/10] lg:max-h-[calc(100dvh-9.5rem)]"
+              className="w-full max-w-full overflow-hidden rounded-[2rem] bg-ink p-2 shadow-[0_24px_60px_-24px_rgba(23,21,15,0.55)] ring-1 ring-ink/10 lg:h-full lg:max-h-[640px]"
             >
               <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[1.6rem] border border-paper/10 bg-zinc-900 text-paper">
                 <header className="flex items-start justify-between gap-3 border-b border-paper/10 px-4 py-3">
@@ -423,15 +423,15 @@ export default function AlexaSimulator() {
                     <StatusRing state={ring} />
                     <p className="mt-3 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-paper/60">{RING_LABEL[ring]}</p>
                     <div className="mt-4 min-h-16 w-full text-center motion-reduce:transition-none" aria-live="polite" aria-atomic="true" data-testid="alexa-caption">
-                      {userLine ? <p className="text-[22px] leading-snug text-paper/70 transition-opacity duration-200">{userLine}</p> : null}
-                      <p className="mt-1 text-[22px] font-medium leading-snug text-paper transition-opacity duration-200">
+                      {userLine ? <p className="text-[clamp(16px,2.6dvh,22px)] leading-snug text-paper/70 transition-opacity duration-200">{userLine}</p> : null}
+                      <p className="mt-1 text-[clamp(16px,2.6dvh,22px)] font-medium leading-snug text-paper transition-opacity duration-200">
                         {spokenLine || (busy ? '…' : '')}
                       </p>
                     </div>
                     {approval ? (
                     <div data-testid="alexa-approval" className="mt-4 rounded-3xl border border-butter/50 bg-butter/15 p-4 shadow-[0_12px_32px_-20px_rgba(23,21,15,0.8)]">
                       <p className="text-[10px] font-black uppercase tracking-[0.16em] text-butter">Waiting for approval</p>
-                      <p className="mt-2 text-lg leading-snug text-paper">{approval.summary || approval.speech}</p>
+                      <p className="mt-2 text-base leading-snug text-paper">{approval.summary || approval.speech}</p>
                       <div className="mt-3 flex gap-2">
                         <button
                           type="button"
