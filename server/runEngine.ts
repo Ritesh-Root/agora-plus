@@ -42,6 +42,32 @@ const closing = new Set<string>();
 const HOUSEHOLD_BUSY = 'The team is still working on the last plan. Ask me for its status.';
 const SAVE_FAILED = 'The finished plan could not be saved.';
 
+const settledRuns = new Map<string, Promise<void>>();
+const settleRunNow = new Map<string, () => void>();
+
+/** Resolves when that run's finish path has written its final status. Tests wait on this instead of the clock. */
+export function whenRunSettled(runId: string): Promise<void> {
+  const existing = settledRuns.get(runId);
+  if (existing) return existing;
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  settledRuns.set(runId, promise);
+  settleRunNow.set(runId, resolve);
+  return promise;
+}
+
+function settleRun(runId: string): void {
+  const resolve = settleRunNow.get(runId);
+  if (resolve) {
+    settleRunNow.delete(runId);
+    resolve();
+    return;
+  }
+  settledRuns.set(runId, Promise.resolve());
+}
+
 function send(ws: WsSocket, msg: ServerMessage): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
@@ -421,7 +447,7 @@ export async function startSocietyRun(input: {
   const provider = input.provider;
   provider.prepareRequest({ runId, stage: 'planning', agent: team[0]?.name ?? 'Manager', attempt: 1 });
   let negotiationRes: any;
-  runSociety(input.brief, provider, {
+  void runSociety(input.brief, provider, {
     models: model ? { manager: model, worker: model } : undefined,
     team,
     presetTasks: input.presetTasks,
@@ -479,6 +505,7 @@ export async function startSocietyRun(input: {
       endRunStats();
       clearBoss();
       const spokenSummary = await householdSpokenSummary(input.source, provider, result.synthesis, result.tasks);
+      if (spokenSummary) room.noteSpokenSummary(runId, spokenSummary);
       const saveError = await saveFinished(runId, 'stopped', {
         brief: result.brief,
         tasks: taskRows,
@@ -490,6 +517,7 @@ export async function startSocietyRun(input: {
       return;
     }
     const spokenSummary = await householdSpokenSummary(input.source, provider, result.synthesis, result.tasks);
+    if (spokenSummary) room.noteSpokenSummary(runId, spokenSummary);
     const intended = result.revisionLabel ? 'needs_revision' as const : 'complete' as const;
     const saveError = await saveFinished(runId, intended, {
       brief: result.brief,
@@ -563,9 +591,12 @@ export async function startSocietyRun(input: {
       deliver({ type: 'society-error', error: publicModelError(err) });
       const snapshot = roomSnapshot(runId, input.brief);
       const spokenSummary = await householdSpokenSummary(input.source, provider, snapshot.synthesis, snapshot.tasks);
+      if (spokenSummary) room.noteSpokenSummary(runId, spokenSummary);
       const saveError = await saveFinished(runId, 'stopped', { ...snapshot, spokenSummary });
       if (saveError) deliver({ type: 'society-error', error: saveError });
     }
+  }).finally(() => {
+    settleRun(runId);
   });
 
   return { ok: true, runId };

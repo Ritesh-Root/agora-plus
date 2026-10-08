@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordPasscodeMiss, resetPasscodeLimiter, setPasscodeClock, verifySessionToken } from './session';
 import { setDataDir, writeText } from './store';
 import { handleApiRoutes } from '../routes';
@@ -123,11 +123,22 @@ describe('household session', () => {
   });
 
   it('waits before rejecting a wrong passcode', async () => {
-    const started = Date.now();
-    const result = await call('POST', '/api/session', { host: 'localhost:3000', 'content-type': 'application/json' }, { passcode: 'nope' });
-    expect(result.status).toBe(401);
-    expect(JSON.parse(result.body)).toEqual({ error: 'invalid_passcode' });
-    expect(Date.now() - started).toBeGreaterThanOrEqual(200);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let settled = false;
+      const pending = call('POST', '/api/session', { host: 'localhost:3000', 'content-type': 'application/json' }, { passcode: 'nope' }).then((result) => {
+        settled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(249);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await pending;
+      expect(result.status).toBe(401);
+      expect(JSON.parse(result.body)).toEqual({ error: 'invalid_passcode' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('leaves the routes open on loopback when no passcode is configured', async () => {
@@ -154,6 +165,40 @@ describe('household session', () => {
     setPasscodeClock(() => Date.now() + 15 * 60 * 1000 + 1000);
     const again = await call('POST', '/api/session', { host: 'localhost:3000', 'content-type': 'application/json' }, { passcode: 'nope' });
     expect(again.status).toBe(401);
+  });
+
+  it('keys the limiter on the first forwarded address only when the proxy is trusted', async () => {
+    for (let i = 0; i < 4; i += 1) recordPasscodeMiss('10.0.0.8');
+    const ignored = await call('POST', '/api/session', {
+      host: 'localhost:3000',
+      'content-type': 'application/json',
+      'x-forwarded-for': '203.0.113.9',
+    }, { passcode: 'nope' }, '10.0.0.8');
+    expect(ignored.status).toBe(429);
+
+    resetPasscodeLimiter();
+    process.env.AGORA_TRUST_PROXY = '1';
+    for (let i = 0; i < 4; i += 1) recordPasscodeMiss('203.0.113.9');
+    const blocked = await call('POST', '/api/session', {
+      host: 'localhost:3000',
+      'content-type': 'application/json',
+      'x-forwarded-for': '203.0.113.9, 10.0.0.8',
+    }, { passcode: 'nope' }, '10.0.0.8');
+    expect(blocked.status).toBe(429);
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const other = call('POST', '/api/session', {
+        host: 'localhost:3000',
+        'content-type': 'application/json',
+        'x-forwarded-for': '198.51.100.4',
+      }, { passcode: 'nope' }, '10.0.0.8');
+      await vi.advanceTimersByTimeAsync(250);
+      const result = await other;
+      expect(result.status).toBe(401);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('marks the cookie Secure only when AGORA_TRUST_PROXY trusts the forwarded proto', async () => {

@@ -21,6 +21,10 @@ describe('tool loop', () => {
       { type: 'tool_use', id: 'call_tasks', name: 'list_tasks', input: {} },
     ];
     let sentBack: unknown;
+    let releaseList: () => void = () => {};
+    const holdList = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
     const result = await runToolLoop({
       model: 'anthropic.claude-haiku-4-5',
       system: 'Be brief.',
@@ -33,8 +37,13 @@ describe('tool loop', () => {
         return { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Milk is in the fridge.' }] };
       },
       execute: async (name) => {
-        if (name === 'list_tasks') await new Promise((resolve) => setTimeout(resolve, 20));
-        return name === 'recall' ? { memories: ['milk'] } : { tasks: [] };
+        if (name === 'list_tasks') {
+          await holdList;
+          return { tasks: [] };
+        }
+        await Promise.resolve();
+        releaseList();
+        return { memories: ['milk'] };
       },
     });
 

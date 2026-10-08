@@ -285,6 +285,7 @@ export function attachRelay(httpServer: Server): void {
                     synthesis: restored.synthesis,
                     wordCount: restored.wordCount,
                     revisionLabel: restored.revisionLabel,
+                    ...(restored.spokenSummary ? { spokenSummary: restored.spokenSummary } : {}),
                   },
                 });
               }

@@ -56,9 +56,23 @@ export function resetPasscodeLimiter(): void {
   passcodeNow = () => Date.now();
 }
 
+function clientAddress(raw: string): string {
+  return raw.trim().toLowerCase().replace(/^::ffff:/, '');
+}
+
+/**
+ * Limiter key. Behind `AGORA_TRUST_PROXY=1` this is the first `X-Forwarded-For`
+ * address, so one person's guesses do not lock everyone who shares the proxy.
+ * Without that setting the header is ignored and the TCP peer is the key.
+ */
 export function passcodeClientKey(req: IncomingMessage): string {
-  const raw = req.socket?.remoteAddress ?? 'unknown';
-  return raw.toLowerCase().replace(/^::ffff:/, '');
+  if (process.env.AGORA_TRUST_PROXY === '1') {
+    const forwarded = req.headers['x-forwarded-for'];
+    const header = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const first = header?.split(',')[0];
+    if (first?.trim()) return clientAddress(first);
+  }
+  return clientAddress(req.socket?.remoteAddress ?? 'unknown');
 }
 
 /** True while this address is inside the 15 minute lockout. */

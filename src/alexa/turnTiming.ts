@@ -123,6 +123,26 @@ export function approvalCopy(card: { summary?: string; speech?: string }): strin
   return `${summary}\n${speech}`;
 }
 
+export interface ApprovalCard {
+  name: string;
+  status: string;
+}
+
+/** The waiting card stays up through later turns until approve_action finishes. */
+export function visibleApproval<T extends ApprovalCard>(turns: { tools: T[] }[], phase: string): T | undefined {
+  if (phase !== 'approval') return undefined;
+  for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const tools = turns[turnIndex]?.tools ?? [];
+    for (let index = tools.length - 1; index >= 0; index -= 1) {
+      const card = tools[index];
+      if (!card) continue;
+      if (card.name === 'approve_action' && card.status === 'ok') return undefined;
+      if (card.status === 'needs_approval') return card;
+    }
+  }
+  return undefined;
+}
+
 const DECLINE = new Set(['no', 'nope', 'nah', 'decline', 'cancel']);
 
 /** Whole phrase only. "no but not Tuesday" is not a decline. */

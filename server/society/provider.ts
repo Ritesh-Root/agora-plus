@@ -1,3 +1,5 @@
+import { fetchPinned } from '../proxyGuard';
+
 /**
  * Server-side OpenAI-compatible LLM provider interface and factory.
  * Automatically routes and maps request payloads dynamically depending on the key:
@@ -59,8 +61,9 @@ export function requestOptions(model: string, isNvidia: boolean): Record<string,
   return model.toLowerCase().includes('deepseek') ? { enable_thinking: false } : {};
 }
 
-export function createServerProvider(apiKey: string, options?: { baseUrl?: string }): ServerProvider {
-  const requested = options?.baseUrl?.trim();
+export function createServerProvider(apiKey: string, options?: { baseUrl?: string; endpoint?: URL }): ServerProvider {
+  const pinned = options?.endpoint;
+  const requested = pinned ? pinned.toString() : options?.baseUrl?.trim();
   const isNvidia = isNvidiaTarget(apiKey, requested);
   const baseUrl = requested
     ? (requested.endsWith('/chat/completions') ? requested : `${requested.replace(/\/$/, '')}/chat/completions`)
@@ -112,17 +115,24 @@ export function createServerProvider(apiKey: string, options?: { baseUrl?: strin
       for (let httpTry = 1; ; httpTry++) {
         try {
           console.info(`[ServerProvider] run=${request.runId} stage=${request.stage} agent=${request.agent} model=${model} attempt=${request.attempt} http=${httpTry}`);
-          const response = await fetch(baseUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify(body),
-            // The host check covers only the first URL, so a redirect could reach a private address.
-            redirect: 'error',
-            signal: AbortSignal.timeout(120_000),
-          });
+          const headers = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          };
+          const payload = JSON.stringify(body);
+          const signal = AbortSignal.timeout(120_000);
+          // A checked caller URL keeps the guard's URL object so the connection
+          // stays on those addresses. A redirect is an error. Default hosts
+          // were not supplied as a URL object and still use fetch.
+          const response = pinned
+            ? await fetchPinned(pinned, { method: 'POST', headers, body: payload, signal, timeoutMs: 120_000 })
+            : await fetch(baseUrl, {
+              method: 'POST',
+              headers,
+              body: payload,
+              redirect: 'error',
+              signal,
+            });
 
           if (!response.ok) {
             const text = await response.text();

@@ -9,6 +9,7 @@ import { HouseholdLocked, streamTurn } from './simClient';
 import { RING_LABEL, StatusRing, type RingState } from './StatusRing';
 import {
   approvalCopy,
+  visibleApproval,
   captionAck,
   captionAckFinished,
   captionAnswer,
@@ -94,14 +95,7 @@ function withSummary(card: ToolCard, incoming: string): ToolCard {
 }
 
 function pendingCard(turns: TraceTurn[], phase: string): ToolCard | undefined {
-  if (phase !== 'approval') return undefined;
-  const latest = turns[turns.length - 1];
-  if (!latest) return undefined;
-  for (let index = latest.tools.length - 1; index >= 0; index -= 1) {
-    const card = latest.tools[index];
-    if (card?.status === 'needs_approval') return card;
-  }
-  return undefined;
+  return visibleApproval(turns, phase);
 }
 
 function PasscodeForm({ onUnlocked }: { onUnlocked: () => void }) {
@@ -334,7 +328,7 @@ export default function AlexaSimulator() {
     setPhase('thinking');
     setDraft('');
     setMicNote(null);
-    let nextPhase: 'idle' | 'approval' | 'error' = 'idle';
+    let nextPhase: 'idle' | 'approval' | 'error' = phase === 'approval' ? 'approval' : 'idle';
     const id = `turn-${serial}`;
     setTurns((current) => [
       ...current,
@@ -387,6 +381,9 @@ export default function AlexaSimulator() {
             else tools.push(next);
             return { ...turn, tools };
           });
+          if (data.name === 'approve_action' && data.status !== 'needs_approval' && data.status !== 'error') {
+            nextPhase = 'idle';
+          }
           if (data.status === 'needs_approval') {
             nextPhase = 'approval';
             setPhase('approval');

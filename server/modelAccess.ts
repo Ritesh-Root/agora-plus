@@ -18,7 +18,7 @@ function chatUrl(baseUrl: string): string {
 export async function resolveModelAccess(
   input: { apiKey?: string; baseUrl?: string },
   resolve?: (hostname: string) => Promise<string[]>,
-): Promise<{ apiKey: string; baseUrl?: string }> {
+): Promise<{ apiKey: string; baseUrl?: string; endpoint?: URL }> {
   const callerKey = input.apiKey?.trim() ?? '';
   const rawBase = input.baseUrl?.trim() ?? '';
   if (rawBase) {
@@ -28,9 +28,9 @@ export async function resolveModelAccess(
       if (!approved) throw new Error(CUSTOM_NEEDS_KEY);
       const serverKey = process.env.DASHSCOPE_API_KEY?.trim() ?? '';
       if (!serverKey) throw new Error(MISSING_KEY);
-      return { apiKey: serverKey, baseUrl: url.toString() };
+      return { apiKey: serverKey, baseUrl: url.toString(), endpoint: url };
     }
-    return { apiKey: callerKey, baseUrl: url.toString() };
+    return { apiKey: callerKey, baseUrl: url.toString(), endpoint: url };
   }
   const key = callerKey || process.env.DASHSCOPE_API_KEY?.trim() || '';
   if (!key) throw new Error(MISSING_KEY);
@@ -40,6 +40,8 @@ export async function resolveModelAccess(
 export interface ResolvedEndpoint {
   apiKey: string;
   baseUrl?: string;
+  /** The URL object the guard pinned. A string copy cannot be fetched on those addresses. */
+  endpoint?: URL;
 }
 
 export interface FailedEndpoint {

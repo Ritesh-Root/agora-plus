@@ -11,11 +11,11 @@ export function createRoutingProvider(
   const request = { runId: '-', stage: 'call', agent: '-', attempt: 1 };
   let fallbackAttached = false;
 
-  function providerFor(apiKey: string, baseUrl?: string): ServerProvider {
+  function providerFor(apiKey: string, baseUrl?: string, endpoint?: URL): ServerProvider {
     const cacheKey = `${apiKey}\n${baseUrl ?? ''}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
-    const created = createServerProvider(apiKey, baseUrl ? { baseUrl } : undefined);
+    const created = createServerProvider(apiKey, baseUrl || endpoint ? { baseUrl, endpoint } : undefined);
     cache.set(cacheKey, created);
     inners.push(created);
     return created;
@@ -50,9 +50,9 @@ export function createRoutingProvider(
         fallback.prepareRequest({ ...request });
         return fallback.generateCompletion(messages, tools, systemInstruction, modelName);
       }
-      const endpoint = route ?? access.fallback;
-      if (isFailed(endpoint)) throw endpoint.error;
-      const inner = providerFor(endpoint.apiKey, endpoint.baseUrl);
+      const chosen = route ?? access.fallback;
+      if (isFailed(chosen)) throw chosen.error;
+      const inner = providerFor(chosen.apiKey, chosen.baseUrl, chosen.endpoint);
       inner.prepareRequest({ ...request });
       return inner.generateCompletion(messages, tools, systemInstruction, route?.model || modelName);
     },

@@ -188,6 +188,14 @@ function tagsFrom(value: unknown): string[] | null {
   return value;
 }
 
+/** Absent is omitted. A non-string is rejected. Blank is omitted. */
+function optionalText(value: unknown, label: string): { ok: true; value?: string } | { ok: false; error: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string') return { ok: false, error: `${label} must be a string.` };
+  const trimmed = value.trim();
+  return { ok: true, value: trimmed || undefined };
+}
+
 async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match): Promise<void> {
   const method = req.method ?? 'GET';
   const write = method !== 'GET' && method !== 'HEAD';
@@ -316,7 +324,12 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
       sendJson(res, 400, { error: 'Tags must be a list of strings.' });
       return;
     }
-    const result = await remember(body.text, tags, 'ui');
+    const who = optionalText(body.who, 'Who');
+    if (who.ok === false) {
+      sendJson(res, 400, { error: who.error });
+      return;
+    }
+    const result = await remember(body.text, tags, 'ui', who.value);
     sendJson(res, result.ok ? 200 : 400, result);
     return;
   }
@@ -377,7 +390,26 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
       sendJson(res, 400, { error: 'Due must be a string.' });
       return;
     }
-    const result = await addTask(body.title, typeof body.due === 'string' ? body.due : undefined, 'ui');
+    const who = optionalText(body.who, 'Who');
+    if (who.ok === false) {
+      sendJson(res, 400, { error: who.error });
+      return;
+    }
+    const list = optionalText(body.list, 'List');
+    if (list.ok === false) {
+      sendJson(res, 400, { error: list.error });
+      return;
+    }
+    const dueAt = optionalText(body.dueAt, 'Due at');
+    if (dueAt.ok === false) {
+      sendJson(res, 400, { error: dueAt.error });
+      return;
+    }
+    const result = await addTask(body.title, typeof body.due === 'string' ? body.due : undefined, 'ui', {
+      who: who.value,
+      list: list.value,
+      dueAt: dueAt.value,
+    });
     sendJson(res, result.ok ? 200 : 400, result);
     return;
   }
