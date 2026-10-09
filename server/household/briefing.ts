@@ -28,13 +28,15 @@ function taskDay(task: HouseholdTask, timeZone: string): string | null {
   return dueDay(task.due);
 }
 
-function isSafety(entry: MemoryEntry): boolean {
-  return /\b(allerg(?:y|ic|ies)|medicine|medication|medical)\b/i.test(`${entry.text} ${entry.tags.join(' ')}`);
+/** Allergies, medicine and diets. A plan or a briefing must never leave these out. */
+export function isSafetyFact(entry: MemoryEntry): boolean {
+  return /\b(allerg(?:y|ic|ies)|medicine|medication|medical|vegetarian|vegan|gluten|lactose|intoleran\w*|diet(?:ary)?|halal|kosher)\b/i
+    .test(`${entry.text} ${entry.tags.join(' ')}`);
 }
 
 function memorySentence(entries: MemoryEntry[]): string | null {
   if (entries.length === 0) return null;
-  const safety = entries.filter(isSafety).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const safety = entries.filter(isSafetyFact).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const newest = entries.slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const pick = safety[0] ?? newest[0];
   if (!pick) return null;

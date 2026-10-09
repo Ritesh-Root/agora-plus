@@ -1,7 +1,7 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { BedrockCreateParams } from '../llm/bedrockProvider';
-import { getBedrock } from '../llm/serverProvider';
+import { getToolModel } from '../llm/serverProvider';
 import { runToolLoop, type ToolCreate, type ToolCreateParams, type ToolCreateResult, type ToolDefinition } from '../llm/toolLoop';
 import { acknowledge } from './ack';
 import { PLAIN_APPROVAL, qualifiedApproval } from './approvalWords';
@@ -57,7 +57,9 @@ function modelFailure(error: unknown): { message: string; detail: string } {
 }
 
 async function bedrockCreate(params: ToolCreateParams): Promise<ToolCreateResult> {
-  const message = await getBedrock().createMessage({
+  const model = getToolModel();
+  if (!model) throw Object.assign(new Error('No server model is configured.'), { name: 'CredentialsProviderError' });
+  const message = await model.createMessage({
     model: params.model,
     max_tokens: params.max_tokens,
     system: params.system,
@@ -163,12 +165,25 @@ function asksAlready(text: string): boolean {
   return lower.includes('should i go ahead') || lower.includes('say yes or no');
 }
 
-function finalSpeech(parsed: ParsedTool): string {
+/** Longer summaries stay on the approval card. The voice gives the count and asks. */
+const SPOKEN_SUMMARY_CHARS = 140;
+
+function sentence(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+export function finalSpeech(parsed: Pick<ParsedTool, 'status' | 'speech' | 'summary'>): string {
   if (parsed.status === 'needs_approval') {
     const summary = (parsed.summary || parsed.speech).trim();
     if (!summary) return 'Should I go ahead?';
     if (asksAlready(summary)) return summary;
-    return `${summary} Should I go ahead?`;
+    if (summary.length > SPOKEN_SUMMARY_CHARS) {
+      const steps = /^Plan:\s*(\d+)\s+steps?/i.exec(summary)?.[1];
+      const lead = steps ? `I have a ${steps}-step plan. The steps are on screen.` : 'The details are on screen.';
+      return `${lead} Should I go ahead?`;
+    }
+    return `${sentence(summary)} Should I go ahead?`;
   }
   return parsed.speech.trim() || 'Done.';
 }

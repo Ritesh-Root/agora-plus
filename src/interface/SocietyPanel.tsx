@@ -133,6 +133,9 @@ export const SocietyPanel: React.FC = () => {
               <div>
                 <p className="text-xs font-black uppercase tracking-widest text-red-600">Swarm Error</p>
                 <p className="text-xs text-red-700 mt-1 font-medium">{error}</p>
+                {/model is not available|api key|not configured/i.test(error) ? (
+                  <p className="text-xs text-red-700/80 mt-1">Pick a working model in Model connections (the key icon in the header), or configure a server model.</p>
+                ) : null}
               </div>
             </div>
           )}

@@ -170,6 +170,42 @@ function normalizeTask(raw: unknown, index: number): SocietyTask {
   };
 }
 
+/**
+ * Open models sometimes put a raw line break or tab inside a JSON string, which JSON.parse
+ * rejects. Escape control characters that sit inside string literals; leave the rest alone.
+ */
+export function escapeControlInStrings(text: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      } else if (char < ' ') {
+        out += char === '\n' ? '\\n' : char === '\r' ? '\\r' : char === '\t' ? '\\t' : `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
+        continue;
+      }
+    } else if (char === '"') {
+      inString = true;
+    }
+    out += char;
+  }
+  return out;
+}
+
+function parseLoose(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return JSON.parse(escapeControlInStrings(text));
+  }
+}
+
 /** Parse the Manager's plan, tolerating code fences and surrounding prose. */
 export function parsePlan(content: string | null): SocietyTask[] {
   if (!content || !content.trim()) {
@@ -185,11 +221,11 @@ export function parsePlan(content: string | null): SocietyTask[] {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(cleaned);
+    parsed = parseLoose(cleaned);
   } catch {
     const match = cleaned.match(/\[[\s\S]*\]/);
     if (!match) throw new Error('Manager plan is not valid JSON');
-    parsed = JSON.parse(match[0]);
+    parsed = parseLoose(match[0]);
   }
 
   if (!Array.isArray(parsed)) {

@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { recognitionError } from './micErrors';
+import { micBlockedReason, recognitionError } from './micErrors';
 
 interface SpeechControls {
   supported: boolean;
   listening: boolean;
   interim: string;
+  /** Set when the browser refused the microphone or has no speech service. Typing still works. */
+  blocked: string | null;
   start: () => void;
   stop: () => void;
 }
 
-/** Push-to-talk. Interim words stay on screen until the phrase is released. */
+/** A press shorter than this is "tap to talk": listening continues until the next tap. */
+export const TAP_MS = 350;
+/** A tapped turn stops on its own after this, in case nobody taps again. */
+export const TAP_LIMIT_MS = 12_000;
+
+/** Push-to-talk or tap-to-talk. Interim words stay on screen until the phrase ends. */
 export function useSpeechInput(
   onFinal: (text: string) => void,
   onError?: (message: string) => void,
@@ -24,6 +31,7 @@ export function useSpeechInput(
   const errorNote = useRef<string | null>(null);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
+  const [blocked, setBlocked] = useState<string | null>(null);
   const supported = typeof window !== 'undefined'
     && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
@@ -36,6 +44,31 @@ export function useSpeechInput(
     window.addEventListener('blur', onBlur);
     return () => window.removeEventListener('blur', onBlur);
   }, [stop]);
+
+  // Know about a denied microphone before the first press, and notice when it is allowed again.
+  useEffect(() => {
+    if (!supported || typeof navigator === 'undefined' || !navigator.permissions?.query) return;
+    const denied = micBlockedReason('not-allowed');
+    let status: PermissionStatus | null = null;
+    let cancelled = false;
+    const apply = () => {
+      if (!status) return;
+      if (status.state === 'denied') setBlocked(denied);
+      else setBlocked((current) => (current === denied ? null : current));
+    };
+    navigator.permissions.query({ name: 'microphone' as PermissionName }).then((result) => {
+      if (cancelled) return;
+      status = result;
+      apply();
+      result.addEventListener('change', apply);
+    }).catch(() => {
+      // Some browsers cannot query the microphone. The first press reports instead.
+    });
+    return () => {
+      cancelled = true;
+      status?.removeEventListener('change', apply);
+    };
+  }, [supported]);
 
   const start = useCallback(() => {
     const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -61,22 +94,25 @@ export function useSpeechInput(
     };
     rec.onerror = (event) => {
       const message = recognitionError(event.error);
+      const reason = micBlockedReason(event.error);
+      if (reason) setBlocked(reason);
       if (message) {
         errorNote.current = message;
-        onErrorRef.current?.(message);
+        onErrorRef.current?.(reason ?? message);
       }
       setListening(false);
     };
+    rec.onstart = () => setBlocked(null);
     rec.onend = () => {
       recognition.current = null;
       setListening(false);
-      const blocked = errorNote.current;
+      const failed = errorNote.current;
       const text = (liveText.current || finalText.current).trim();
       finalText.current = '';
       liveText.current = '';
       errorNote.current = null;
       setInterim('');
-      if (blocked || !text) return;
+      if (failed || !text) return;
       onFinalRef.current(text);
     };
     recognition.current = rec;
@@ -90,5 +126,5 @@ export function useSpeechInput(
     }
   }, []);
 
-  return { supported, listening, interim, start, stop };
+  return { supported, listening, interim, blocked, start, stop };
 }

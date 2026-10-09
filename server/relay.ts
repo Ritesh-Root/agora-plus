@@ -11,7 +11,7 @@ import { normalizeChatText } from './roomState';
 import { runRoomDiscussion } from './roomReply';
 import { runBenchmark } from './bench/runner';
 import { createRoutingProvider } from './routingProvider';
-import { getBedrock, serverLlmMode } from './llm/serverProvider';
+import { getToolModel } from './llm/serverProvider';
 import { isFailed, resolveRoutedAccess } from './modelAccess';
 import { handleModelTest } from './modelTest';
 import { householdLockEnabled, householdSessionActive } from './household/session';
@@ -39,7 +39,11 @@ async function providerFromClient(
     baseUrl: msg.baseUrl,
     agents: readAgentAccess(msg.agents),
   });
-  const bedrock = serverLlmMode() === 'bedrock' ? getBedrock() : undefined;
+  const bedrock = getToolModel() ?? undefined;
+  // With no key from the browser, the configured server model wins over the shared DashScope key.
+  if (bedrock && !msg.apiKey?.trim() && !msg.baseUrl?.trim() && !isFailed(access.fallback)) {
+    access.fallback = { error: new Error('The server model answers this run.') };
+  }
   if (options.requireAll) {
     const failedAgent = access.agents.find((agent) => isFailed(agent));
     if (failedAgent && isFailed(failedAgent)) throw failedAgent.error;

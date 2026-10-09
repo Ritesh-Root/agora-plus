@@ -37,6 +37,7 @@ const Header: React.FC = () => {
             ? 'Planning'
             : 'Agents working';
   const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const [playersOpen, setPlayersOpen] = useState(false);
   const hasKey = !!llmConfig.apiKey;
 
   // New Brief Input Modal State
@@ -173,17 +174,33 @@ const Header: React.FC = () => {
 
         <div className="w-px h-4 bg-zinc-200" />
 
-        <div className="relative group">
+        <div
+          className="relative group"
+          onMouseLeave={() => setPlayersOpen(false)}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPlayersOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setPlayersOpen(false);
+          }}
+        >
           <button
+            type="button"
             data-testid="players-popover-btn"
-            className="flex items-center gap-1.5 text-zinc-500 hover:text-ink transition-colors px-2 py-1 cursor-default"
+            aria-expanded={playersOpen}
+            aria-controls="players-popover"
+            onClick={() => setPlayersOpen((open) => !open)}
+            className="flex items-center gap-1.5 text-zinc-500 hover:text-ink transition-colors px-2 py-1"
             title="Players connected"
           >
             <Users size={16} />
             <span className="text-[10px] font-black uppercase tracking-wider">{roster.length}/{MAX_PLAYERS}</span>
           </button>
 
-          <div className="absolute top-full right-0 mt-2 w-52 bg-white rounded-2xl shadow-[0_16px_40px_-8px_rgba(0,0,0,0.15)] border border-zinc-100 p-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+          <div
+            id="players-popover"
+            className={`absolute top-full right-0 mt-2 w-52 bg-white rounded-2xl shadow-[0_16px_40px_-8px_rgba(0,0,0,0.15)] border border-zinc-100 p-2 transition-all z-50 group-hover:opacity-100 group-hover:visible ${playersOpen ? 'opacity-100 visible' : 'opacity-0 invisible'}`}
+          >
             {roster.length === 0 ? (
               <p className="text-[10px] font-medium text-zinc-300 px-2 py-1.5">No players connected yet</p>
             ) : (

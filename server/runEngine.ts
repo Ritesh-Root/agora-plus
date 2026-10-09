@@ -325,6 +325,17 @@ function roomSnapshot(runId: string, brief: string): { brief: string; tasks: Run
 const RUN_FILE = /^[0-9a-f-]{36}\.json$/i;
 
 /** The in-progress room run, otherwise the saved record. */
+/**
+ * A file that still says running, for a run this process is not running, was cut off by a
+ * restart or a crash. Report it as stopped so the voice and the panel do not wait forever.
+ */
+function settleOrphan(record: RunRecord): RunRecord {
+  if (record.status !== 'running' && record.status !== 'cancel_requested') return record;
+  const current = getHub().room.currentRun();
+  if (current && current.id === record.id) return record;
+  return { ...record, status: 'stopped', error: record.error ?? 'The run was interrupted by a server restart.' };
+}
+
 export async function getRunRecord(runId: string): Promise<RunRecord | null> {
   if (!/^[0-9a-f-]{36}$/i.test(runId)) return null;
   const current = getHub().room.currentRun();
@@ -344,7 +355,8 @@ export async function getRunRecord(runId: string): Promise<RunRecord | null> {
   const held = unsaved.get(runId);
   if (held) return held;
   try {
-    return await readJson<RunRecord | null>(`runs/${runId}.json`, null);
+    const saved = await readJson<RunRecord | null>(`runs/${runId}.json`, null);
+    return saved ? settleOrphan(saved) : null;
   } catch {
     return null;
   }
@@ -363,7 +375,7 @@ export async function listRecentRuns(n: number): Promise<RunRecord[]> {
     if (!RUN_FILE.test(name)) continue;
     try {
       const record = await readJson<RunRecord | null>(`runs/${name}`, null);
-      if (record && typeof record.id === 'string') records.set(record.id, unsaved.get(record.id) ?? record);
+      if (record && typeof record.id === 'string') records.set(record.id, unsaved.get(record.id) ?? settleOrphan(record));
     } catch {
       // Skip a file that is not a run record.
     }

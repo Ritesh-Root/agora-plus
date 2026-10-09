@@ -6,7 +6,7 @@ import { getRunRecord, whenRunSettled } from '../runEngine';
 import { defaultServerProvider } from '../llm/serverProvider';
 import type { ServerProvider } from '../society/provider';
 import {
-  addTask, askAgora, askTimeoutMs, dailyBriefing, forget, householdSnapshot, recall, remember, requestRun, setServerProviderFactory,
+  addTask, askAgora, askTimeoutMs, dailyBriefing, forget, householdSnapshot, planningMemory, recall, remember, requestRun, setServerProviderFactory,
 } from './actions';
 import { clearPendingApprovals, listPendingApprovals, resolveApproval } from './approvals';
 import { addMemory } from './memoryStore';
@@ -336,5 +336,25 @@ describe('askAgora timeout', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('planningMemory', () => {
+  const entry = (id: string, text: string, tags: string[] = []) => ({
+    id, text, tags, createdAt: '2026-10-08T00:00:00.000Z', updatedAt: '2026-10-08T00:00:00.000Z', source: 'ui' as const,
+  });
+
+  it('gives a dinner plan the allergy even when the goal never names it', () => {
+    const allergy = entry('a', 'Mia is allergic to peanuts');
+    const copy = entry('b', 'Mia is allergic to peanuts.');
+    const school = entry('c', 'Jen goes to North School');
+    const picked = planningMemory([], [allergy, copy, school]);
+    expect(picked.map((item) => item.text)).toEqual(['Mia is allergic to peanuts']);
+  });
+
+  it('keeps matched facts after the safety facts', () => {
+    const vegan = entry('v', 'Sam eats vegan');
+    const pasta = entry('p', 'We like pasta on Fridays');
+    expect(planningMemory([pasta], [pasta, vegan]).map((item) => item.id)).toEqual(['v', 'p']);
   });
 });

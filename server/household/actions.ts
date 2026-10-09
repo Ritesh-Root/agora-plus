@@ -7,11 +7,12 @@ import { quickResearch, researchConfigured, type ResearchSource } from '../resea
 import { planSociety, type SocietyTask } from '../society/Orchestrator';
 import type { ServerProvider } from '../society/provider';
 import { listPendingApprovals, registerApprovalHandler, requestApproval } from './approvals';
-import { buildBriefing } from './briefing';
+import { buildBriefing, isSafetyFact } from './briefing';
 import { resolveDueText } from './clock';
 import {
   answerRecall,
   listMemory,
+  normaliseFact,
   removeMemory,
   saveMemory,
   searchMemory,
@@ -35,7 +36,7 @@ export interface Receipt {
 
 type ProviderFactory = () => Promise<ServerProvider>;
 
-/** Bedrock when AGORA_SERVER_LLM=bedrock, otherwise the server API key. */
+/** Bedrock or the OpenAI-compatible endpoint (AGORA_SERVER_LLM), otherwise the server API key. */
 let providerFactory: ProviderFactory = defaultServerProvider;
 
 export function setServerProviderFactory(fn: ProviderFactory): void {
@@ -48,6 +49,22 @@ export function getServerProvider(): Promise<ServerProvider> {
 
 function receipt(action: string, id: string, verified: boolean): Receipt {
   return { action, id, verified, at: new Date().toISOString() };
+}
+
+/**
+ * What the team should know for a plan: every safety fact (an allergy matters to a dinner plan
+ * even when the goal never names it), then the facts that match the goal. Same text once.
+ */
+export function planningMemory(matched: MemoryEntry[], all: MemoryEntry[]): MemoryEntry[] {
+  const seen = new Set<string>();
+  const picked: MemoryEntry[] = [];
+  for (const entry of [...all.filter(isSafetyFact), ...matched]) {
+    const key = normaliseFact(entry.text);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picked.push(entry);
+  }
+  return picked;
 }
 
 function householdBrief(goal: string, memories: MemoryEntry[]): string {
@@ -442,7 +459,7 @@ export async function requestRun(goal: string) {
   if (cannotCarryOut(trimmed)) {
     return { ok: false as const, status: 'error' as const, error: CANNOT_CARRY_OUT, speech: CANNOT_CARRY_OUT };
   }
-  const memories = await searchMemory(trimmed);
+  const memories = planningMemory(await searchMemory(trimmed), await listMemory());
   const brief = householdBrief(trimmed, memories);
   let tasks: SocietyTask[] = [];
   try {

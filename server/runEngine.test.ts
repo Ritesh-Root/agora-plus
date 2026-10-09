@@ -158,10 +158,13 @@ describe('runEngine', () => {
       '00000000-0000-4000-8000-000000000002',
       '00000000-0000-4000-8000-000000000001',
     ]);
+    // That file says running, but no run is live in this process: a restart cut it off.
     expect(recent[0]).toMatchObject({
-      status: 'running',
+      status: 'stopped',
       startedAt: '2026-10-08T12:00:00.000Z',
+      error: 'The run was interrupted by a server restart.',
     });
+    expect(await getRunRecord('00000000-0000-4000-8000-000000000002')).toMatchObject({ status: 'stopped' });
   });
 
   it('keeps a visible error when the finished run cannot be saved', async () => {

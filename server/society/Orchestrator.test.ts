@@ -189,6 +189,12 @@ describe('planSociety', () => {
 });
 
 describe('parsePlan', () => {
+  it('reads a plan whose strings contain raw line breaks and tabs', () => {
+    const raw = '[{"id":"a","title":"Shop","role":"Planner","prompt":"List milk\nand eggs\tfor Monday"}]';
+    const tasks = parsePlan(raw);
+    expect(tasks[0]?.prompt).toBe('List milk\nand eggs\tfor Monday');
+  });
+
   it('parses a fenced JSON code block', () => {
     const tasks = parsePlan('```json\n[{"id":"a","title":"A","role":"worker","prompt":"do a"}]\n```');
     expect(tasks).toHaveLength(1);

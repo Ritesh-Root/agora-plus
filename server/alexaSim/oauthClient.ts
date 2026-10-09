@@ -91,9 +91,12 @@ export function simMode(): SimMode {
 }
 
 export function alexaModelName(): string {
-  return process.env.ALEXA_SIM_MODEL?.trim()
-    || process.env.BEDROCK_FAST_MODEL?.trim()
-    || 'anthropic.claude-haiku-4-5';
+  const chosen = process.env.ALEXA_SIM_MODEL?.trim();
+  if (chosen) return chosen;
+  if (process.env.AGORA_SERVER_LLM === 'openai') {
+    return process.env.AGORA_LLM_FAST_MODEL?.trim() || process.env.AGORA_LLM_MODEL?.trim() || 'anthropic.claude-haiku-4-5';
+  }
+  return process.env.BEDROCK_FAST_MODEL?.trim() || 'anthropic.claude-haiku-4-5';
 }
 
 export function selfBase(req: IncomingMessage): string {

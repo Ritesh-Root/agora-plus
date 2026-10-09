@@ -25,7 +25,7 @@ import {
   type Caption,
   type TurnClock,
 } from './turnTiming';
-import { useSpeechInput } from './useSpeechInput';
+import { TAP_LIMIT_MS, TAP_MS, useSpeechInput } from './useSpeechInput';
 import { useSpeechOutput, type SpeechHooks } from './useSpeechOutput';
 
 const SAMPLES = [
@@ -177,6 +177,9 @@ export default function AlexaSimulator() {
   const seenRuns = useRef(new Set<string>());
   const toastTimer = useRef(0);
   const holding = useRef(false);
+  const pressedAt = useRef(0);
+  const tapping = useRef(false);
+  const tapTimer = useRef(0);
   const approveRef = useRef<HTMLButtonElement | null>(null);
   const talkRef = useRef<HTMLButtonElement | null>(null);
   const focusedApproval = useRef<string | null>(null);
@@ -450,26 +453,75 @@ export default function AlexaSimulator() {
 
   const onMicError = useCallback((message: string) => {
     setMicNote(message);
-    if (message === 'Microphone blocked') {
+    if (/blocked|no microphone|needs chrome/i.test(message)) {
       document.getElementById('alexa-utterance')?.focus();
     }
   }, []);
 
-  const { supported, listening, interim, start, stop: stopInput } = useSpeechInput((text) => {
+  const { supported, listening, interim, blocked, start, stop: stopInput } = useSpeechInput((text) => {
     void submit(text);
   }, onMicError);
   const listeningRef = useRef(listening);
   listeningRef.current = listening;
+  const speakingRef = useRef(speaking);
+  speakingRef.current = speaking;
+  const voiceReady = supported && !blocked;
 
   const bargeIn = useCallback(() => {
     haltSpeech();
     start();
   }, [haltSpeech, start]);
 
+  /** Voice input cannot start here. Say why once and hand the keyboard to the text box. */
+  const explainNoVoice = useCallback(() => {
+    setMicNote(blocked ?? 'Voice input needs Chrome or Edge. Type below.');
+    document.getElementById('alexa-utterance')?.focus();
+  }, [blocked]);
+
+  const endTap = useCallback(() => {
+    tapping.current = false;
+    window.clearTimeout(tapTimer.current);
+  }, []);
+
+  /** Tap to talk: listen until the next tap, the phrase ends, or the time limit. */
+  const beginTap = useCallback(() => {
+    tapping.current = true;
+    window.clearTimeout(tapTimer.current);
+    tapTimer.current = window.setTimeout(() => {
+      tapping.current = false;
+      stopInput();
+    }, TAP_LIMIT_MS);
+  }, [stopInput]);
+
+  useEffect(() => {
+    if (!listening) endTap();
+  }, [endTap, listening]);
+
+  /** The ring is the device's main button, like the light bar on an Echo. */
+  const pressRing = useCallback(() => {
+    if (speakingRef.current) {
+      haltSpeech();
+      return;
+    }
+    if (listeningRef.current) {
+      endTap();
+      stopInput();
+      return;
+    }
+    if (!voiceReady) {
+      explainNoVoice();
+      return;
+    }
+    bargeIn();
+    beginTap();
+  }, [bargeIn, beginTap, endTap, explainNoVoice, haltSpeech, stopInput, voiceReady]);
+
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
-  const speakingRef = useRef(speaking);
-  speakingRef.current = speaking;
+  const voiceReadyRef = useRef(voiceReady);
+  voiceReadyRef.current = voiceReady;
+  const explainRef = useRef(explainNoVoice);
+  explainRef.current = explainNoVoice;
   const approval = pendingCard(turns, phase);
   const approvalRef = useRef(approval);
   approvalRef.current = approval;
@@ -497,6 +549,10 @@ export default function AlexaSimulator() {
       if (target instanceof HTMLElement && target.closest('input, textarea, select')) return;
       if (target instanceof HTMLElement && target.closest('a, button') && !target.closest('#talk-btn')) return;
       event.preventDefault();
+      if (!voiceReadyRef.current) {
+        explainRef.current();
+        return;
+      }
       bargeIn();
     };
     const up = (event: KeyboardEvent) => {
@@ -551,6 +607,8 @@ export default function AlexaSimulator() {
           for (const taskId of notices.taskIds) seenTasks.current.add(taskId);
           for (const runId of notices.runIds) seenRuns.current.add(runId);
           showToast(notices.lines.join(' '));
+          // A finished plan is the answer to the last yes, so it stays on the device, not only in the toast.
+          if (notices.runIds.length > 0) setCaption(notices.lines[notices.lines.length - 1] ?? '');
           for (const line of notices.lines) speakRef.current(line);
         } catch {
           // The next poll tries again. A missed reminder is not an error on screen.
@@ -632,7 +690,15 @@ export default function AlexaSimulator() {
 
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
                   <div className="m-auto flex w-full flex-col items-center">
-                    <StatusRing state={ring} />
+                    <button
+                      type="button"
+                      data-testid="alexa-ring"
+                      onClick={pressRing}
+                      aria-label={speaking ? 'Stop speaking' : listening ? 'Stop listening and send' : voiceReady ? 'Tap to talk' : 'Voice input unavailable, type below'}
+                      className={`rounded-full transition-transform duration-150 hover:scale-[1.03] active:scale-[0.98] motion-reduce:transition-none ${FOCUS}`}
+                    >
+                      <StatusRing state={ring} />
+                    </button>
                     <p className="mt-3 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-paper/60">{RING_LABEL[ring]}</p>
                     <div className="mt-4 min-h-16 w-full text-center" aria-live="polite" aria-atomic="true" data-testid="alexa-caption">
                       {userLine ? <p className="text-[clamp(16px,2.6dvh,22px)] leading-snug text-paper/70 transition-opacity duration-200 motion-reduce:transition-none">{userLine}</p> : null}
@@ -684,38 +750,57 @@ export default function AlexaSimulator() {
           </div>
 
           <div className="shrink-0 space-y-3 px-3 py-3 lg:px-6 lg:pb-5">
-            {!supported ? <p className="text-[11px] text-ink/70">Speech recognition needs a Chromium browser. Type below.</p> : null}
-            {micNote ? <p className="text-[11px] text-ink" role="status">{micNote}</p> : null}
+            {!supported ? <p className="text-[11px] text-ink/70">Voice input needs Chrome or Edge. Type below.</p> : null}
+            {supported && (blocked ?? micNote) ? <p className="text-[11px] text-ink" role="status" data-testid="alexa-mic-note">{blocked ?? micNote}</p> : null}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 id="talk-btn"
                 ref={talkRef}
                 aria-pressed={listening}
-                disabled={!supported}
+                aria-disabled={!voiceReady}
+                title={voiceReady ? 'Tap to talk, or hold and let go to send' : blocked ?? 'Voice input needs Chrome or Edge'}
                 onPointerDown={(event) => {
-                  if (!supported) return;
+                  if (event.button !== 0) return;
                   event.preventDefault();
+                  if (!voiceReady) {
+                    explainNoVoice();
+                    return;
+                  }
+                  if (tapping.current && listening) {
+                    // Second tap: send what was heard.
+                    endTap();
+                    stopInput();
+                    return;
+                  }
                   holding.current = true;
+                  pressedAt.current = Date.now();
                   try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* pointer already released */ }
                   bargeIn();
                 }}
                 onPointerUp={() => {
+                  if (!holding.current) return;
                   holding.current = false;
+                  // A quick tap keeps listening until the next tap. A hold sends on release.
+                  if (Date.now() - pressedAt.current < TAP_MS) {
+                    beginTap();
+                    return;
+                  }
                   stopInput();
                 }}
                 onPointerCancel={() => {
-                  holding.current = false;
-                  stopInput();
-                }}
-                onPointerLeave={() => {
                   if (!holding.current) return;
                   holding.current = false;
                   stopInput();
                 }}
-                className={`h-11 min-w-32 shrink-0 rounded-full bg-butter px-4 text-[10px] font-black uppercase tracking-widest text-ink ${FOCUS_INK} disabled:opacity-40`}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return;
+                  event.preventDefault();
+                  pressRing();
+                }}
+                className={`h-11 min-w-32 shrink-0 rounded-full px-4 text-[10px] font-black uppercase tracking-widest ${FOCUS_INK} ${voiceReady ? 'bg-butter text-ink' : 'cursor-not-allowed border border-ink/20 bg-paper text-ink/60'}`}
               >
-                {listening ? 'Listening' : 'Hold to talk'}
+                {listening ? (tapping.current ? 'Tap to send' : 'Listening') : voiceReady ? 'Tap or hold to talk' : 'Mic unavailable'}
               </button>
               {speaking ? (
                 <button
@@ -762,7 +847,7 @@ export default function AlexaSimulator() {
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-ink/60">Hold Space to talk. Press Escape to stop. Answers stay to two short sentences.</p>
+            <p className="text-[11px] text-ink/60">Tap the ring or the button to talk, or hold Space. Press Escape to stop. Answers stay to two short sentences.</p>
           </div>
         </section>
 
