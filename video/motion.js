@@ -730,12 +730,12 @@ build.team = () => {
       prog.visible = prog.material.opacity > 0.003;
       const tile = tiles[i];
       const fly = easeInOut(seg(lt, 2.4 + i * 0.25, 3.6 + i * 0.25));
-      const from = V(center.x, 3.6, center.z + 0.4);
-      const to = V(p.position.x, 1.95, p.position.z);
+      const from = V(center.x + (i - 1.5) * 0.35, 3.25, center.z + 0.7);
+      const to = V(p.position.x, 1.7, p.position.z + 0.1);
       tile.position.set(lerp(from.x, to.x, fly), lerp(from.y, to.y, fly) + Math.sin(Math.PI * fly) * 0.6, lerp(from.z, to.z, fly));
       tile.quaternion.copy(camera.quaternion);
       tile.scale.setScalar(lerp(1, 0.5, fly));
-      fade(tile, a * (fly > 0 && fly < 1 ? 1 : 0));
+      fade(tile, a * (fly > 0 && fly < 1 ? Math.min(1, fly * 6, (1 - fly) * 6) : 0));
     });
     pop(planCard, lt, 1.6, V(center.x, 3.8, center.z + 0.5));
     planCard.quaternion.copy(camera.quaternion);
