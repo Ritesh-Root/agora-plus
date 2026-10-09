@@ -12,8 +12,11 @@ import type { BedrockCallOptions, BedrockCreateParams, BedrockProvider } from '.
 import { toAnthropicMessages } from './bedrockProvider';
 
 const COMPLETION_TOKENS = 4000;
-/** Hosted open models answer slower than Bedrock; a plan preview gets 45 s, a swarm worker 2 min. */
-const PREVIEW_TIMEOUT_MS = 45_000;
+/**
+ * Hosted open models answer slower than Bedrock and their queues spike. A plan preview gets 55 s,
+ * just under the voice page's 60 s MCP request limit; a swarm worker gets 2 min.
+ */
+const PREVIEW_TIMEOUT_MS = 55_000;
 const SWARM_TIMEOUT_MS = 120_000;
 /** Retries for a busy or flaky endpoint (5xx, 429, or an error object inside a 200). */
 const MAX_TRIES = 3;

@@ -15,6 +15,12 @@ import { ACK_PHRASES } from './ack';
 const CACHE_MAX = 100;
 const TEXT_MAX = 1500;
 const TTS_DEADLINE_MS = 4_000;
+/**
+ * After Polly fails (no AWS credentials, throttling, an outage), answer 503 at once for this long.
+ * Without it every spoken line waits seconds on the credential chain before the browser speaks.
+ */
+const DOWN_MS = 5 * 60_000;
+let downUntil = 0;
 
 function ttsOff(): boolean {
   return process.env.AGORA_TTS === '0';
@@ -45,11 +51,13 @@ let warming = false;
 export function setPollyClient(client: PollySpeaker | null): void {
   injected = client;
   cache.clear();
+  downUntil = 0;
 }
 
 export function resetTts(): void {
   injected = null;
   cache.clear();
+  downUntil = 0;
 }
 
 function engine(): Engine {
@@ -110,13 +118,14 @@ async function synthesize(text: string): Promise<Uint8Array> {
 
 /** Fills the cache with the acknowledgement phrases. Failures are ignored. */
 export function warmAcknowledgements(): void {
-  if (warming || ttsOff()) return;
+  if (warming || ttsOff() || Date.now() < downUntil) return;
   warming = true;
   void (async () => {
     for (const phrase of ACK_PHRASES) {
       try {
         await synthesize(phrase);
       } catch {
+        downUntil = Date.now() + DOWN_MS;
         return;
       }
     }
@@ -139,7 +148,7 @@ export async function handleTts(res: ServerResponse, text: unknown): Promise<voi
     sendJson(res, 400, { error: 'Text is too long.' });
     return;
   }
-  if (ttsOff()) {
+  if (ttsOff() || Date.now() < downUntil) {
     sendJson(res, 503, { error: 'tts_unavailable' });
     return;
   }
@@ -153,6 +162,7 @@ export async function handleTts(res: ServerResponse, text: unknown): Promise<voi
     });
     res.end(Buffer.from(bytes));
   } catch {
+    downUntil = Date.now() + DOWN_MS;
     sendJson(res, 503, { error: 'tts_unavailable' });
   }
 }

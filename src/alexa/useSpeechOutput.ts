@@ -41,6 +41,9 @@ function browserSpeak(text: string, token: number, generation: () => number, onS
   });
 }
 
+const POLLY_RETRY_MS = 5 * 60_000;
+let pollyOffUntil = 0;
+
 async function playPolly(
   text: string,
   token: number,
@@ -48,13 +51,18 @@ async function playPolly(
   audioRef: { current: HTMLAudioElement | null },
   onStart?: () => void,
 ): Promise<boolean> {
+  // After one 503 the server has no Polly; skip the round trip and let the browser voice speak now.
+  if (Date.now() < pollyOffUntil) throw new Error('tts');
   const response = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
   if (generation() !== token) return false;
-  if (!response.ok) throw new Error('tts');
+  if (!response.ok) {
+    if (response.status === 503) pollyOffUntil = Date.now() + POLLY_RETRY_MS;
+    throw new Error('tts');
+  }
   const blob = await response.blob();
   if (generation() !== token) return false;
   const url = URL.createObjectURL(blob);
@@ -139,7 +147,9 @@ export function useSpeechOutput(onActive: (active: boolean) => void): {
       }
     } finally {
       draining.current = false;
-      if (queue.current.length > 0 && generation.current === token) void drain();
+      // Lines queued by a newer turn while this loop was finishing must still play,
+      // or the acknowledgement stays on screen and the answer is never spoken.
+      if (queue.current.length > 0) void drain();
       else if (generation.current === token) setActive(false);
     }
   }, [setActive]);

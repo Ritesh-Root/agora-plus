@@ -47,6 +47,19 @@ function call(json: unknown): Promise<{ status: number; body: string; type: stri
 }
 
 describe('POST /api/tts', () => {
+  it('stops asking Polly for a while after it fails, so the browser can speak at once', async () => {
+    let calls = 0;
+    setPollyClient({
+      async send() {
+        calls += 1;
+        throw new Error('Could not load credentials from any providers');
+      },
+    });
+    expect((await call({ text: 'On it.' })).status).toBe(503);
+    expect((await call({ text: 'Let me check.' })).status).toBe(503);
+    expect(calls).toBe(1);
+  });
+
   it('returns 503 when the Polly client throws', async () => {
     const client: PollySpeaker = {
       async send(_command: SynthesizeSpeechCommand) {
