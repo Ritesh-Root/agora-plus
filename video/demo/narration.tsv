@@ -1,0 +1,9 @@
+s1	People are leaving Alexa for chat apps, because simple household jobs still break. So I built Agora plus: a household brain that remembers, asks first, and proves what it did.
+s2	Tell it once. Remember Mia is allergic to peanuts. It answers in milliseconds, with no model call, and hands back a receipt. Verified means the fact was read back from a file, on a server I run.
+s3	Ask what Mia is allergic to, and it answers straight from memory. My morning briefing leads with what matters most.
+s4	It keeps the shopping list, puts a name on each task, and speaks up when a reminder is due.
+s5	Bigger jobs get a plan first. Plan dinners for this week. Four steps, and nothing starts until I say yes. The model is never handed the approve button.
+s6	After my yes, four agents get to work. Agora leads, Scout researches, Planner organises, and Keeper checks the plan against household memory. Keeper's verdict: the grocery list is safe for Mia's peanut allergy.
+s7	Everything it knows sits in a household panel that I can read, edit, and delete.
+s8	Under the hood, every step is a real M C P tool call with secure account linking, so an Alexa plus add-on, or any other assistant, can share the same household brain.
+s9	Agora plus. It remembers, asks first, and proves it.

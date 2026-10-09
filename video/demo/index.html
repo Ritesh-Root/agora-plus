@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AGORA+ demo</title>
+<!--
+  Narrated product demo built from real captures of the running app.
+  Creative brief adapted from two prompts in the opus-video-prompts library (MIT):
+    @twoclipping  https://x.com/twoclipping/status/2102554209166000267  (high-end minimal, real footage only, masked type)
+    @verbove      https://x.com/verbove/status/2103483957266268381      (real UI driven by a cursor, closed-form springs)
+  Every frame is a pure function of time: window.seek(t).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700;800;900&display=block" rel="stylesheet" />
+<style>
+  :root { --paper: #fbf8f1; --ink: #2e2a22; --soft: #6f685a; --butter: #f2cc46; --gold: #b8901a; }
+  html, body { margin: 0; background: var(--paper); overflow: hidden; }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0;
+    background: radial-gradient(1300px 760px at 50% 42%, #fffdf8 0%, #fbf8f1 58%, #f3ecdc 100%);
+    font-family: 'Schibsted Grotesk', system-ui, sans-serif; color: var(--ink); }
+  #win { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; transform-origin: 0 0; border-radius: 16px; overflow: hidden;
+    background: #fff; box-shadow: 0 50px 110px -40px rgba(80, 62, 22, 0.42), 0 0 0 1px rgba(46, 42, 34, 0.08); will-change: transform, opacity, filter; }
+  #win img { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; }
+  #titles, #callouts { position: absolute; inset: 0; pointer-events: none; }
+  .title { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .kicker { font-size: 22px; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold); margin-bottom: 26px; }
+  .line { font-size: 112px; line-height: 1.02; font-weight: 800; letter-spacing: -0.035em; white-space: nowrap; }
+  .line.big { font-size: 200px; font-weight: 900; letter-spacing: -0.045em; }
+  .line.sub { font-size: 38px; font-weight: 600; color: var(--soft); letter-spacing: -0.01em; margin-top: 28px; }
+  .line.foot { font-size: 20px; font-weight: 800; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); margin-top: 34px; }
+  .w { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.04em 0.02em 0.1em; margin: -0.04em 0.11em -0.1em; }
+  .w > span { display: inline-block; will-change: transform; }
+  .plus { color: #e0b52a; }
+  .callout { position: absolute; display: flex; align-items: center; gap: 14px; padding: 16px 24px 16px 18px; border-radius: 999px; background: #fffdf7;
+    box-shadow: 0 18px 40px -18px rgba(80, 62, 22, 0.45), 0 0 0 1px rgba(46, 42, 34, 0.08); font-size: 27px; font-weight: 700; white-space: nowrap; will-change: transform, opacity; }
+  .callout i { width: 14px; height: 14px; border-radius: 50%; background: var(--butter); box-shadow: 0 0 0 5px #fff1c2; flex: none; }
+  #cursor { position: absolute; left: 0; top: 0; width: 38px; height: 38px; will-change: transform, opacity; }
+  #scrim { position: absolute; inset: 0; pointer-events: none; opacity: 0;
+    background: linear-gradient(90deg, rgba(251, 248, 241, 0.97) 0%, rgba(251, 248, 241, 0.92) 28%, rgba(251, 248, 241, 0) 50%); }
+  #foot { position: absolute; right: 64px; bottom: 34px; font-size: 16px; font-weight: 600; color: #a39b8a; letter-spacing: 0.01em; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="win"><img id="imgA" alt="" /><img id="imgB" alt="" /></div>
+  <div id="scrim"></div>
+  <div id="titles"></div>
+  <div id="callouts"></div>
+  <svg id="cursor" viewBox="0 0 38 38"><path d="M6 3 L6 29 L12.5 23 L17 33 L21.5 31 L17 21.5 L26 21.5 Z" fill="#2e2a22" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" /></svg>
+  <div id="foot">Captured from the running app · simulated Alexa+ experience, unofficial</div>
+</div>
+<script>
+(async () => {
+  const manifest = await (await fetch('assets/manifest.json')).json();
+  const B = manifest.boxes;
+  const shotFile = (name) => `assets/${manifest.shots[name] ?? `${name}.jpg`}`;
+  const center = (b, fallback) => (b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : fallback);
+
+  // ---------- timing ----------
+  // Each scene starts when the previous narration line ends, plus a short breath.
+  const { durations } = await (await fetch('audio/timing.json')).json();
+  const GAP = 0.7;
+  const CUES = [0.6];
+  for (let i = 1; i < durations.length; i++) CUES.push(Number((CUES[i - 1] + durations[i - 1] + GAP).toFixed(3)));
+  const [T1, T2, T3, T4, T5, T6, T7, T8, T9] = CUES;
+  window.DURATION = Number((T9 + durations[8] + 2.4).toFixed(2));
+  window.AUDIO_CUES = CUES.map((at, i) => ({ file: `audio/s${i + 1}.mp3`, at }));
+  const clamp01 = (x) => Math.min(1, Math.max(0, x));
+  const seg = (t, a, b) => clamp01((t - a) / (b - a));
+  const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+
+  /** Closed-form spring step: 0 at tau <= 0, settles to 1 with a tiny overshoot. */
+  function spring(tau, hz = 0.8, zeta = 0.86) {
+    if (tau <= 0) return 0;
+    const w = 2 * Math.PI * hz;
+    const wd = w * Math.sqrt(1 - zeta * zeta);
+    return 1 - Math.exp(-zeta * w * tau) * (Math.cos(wd * tau) + (zeta * w / wd) * Math.sin(wd * tau));
+  }
+  /** A channel that changes target at keyframes; one spring per change, summed. */
+  function springTrack(keys, field, hz) {
+    return (t) => {
+      let v = keys[0][field];
+      for (let i = 1; i < keys.length; i++) v += (keys[i][field] - keys[i - 1][field]) * spring(t - keys[i].t, hz);
+      return v;
+    };
+  }
+
+  // ---------- where things are on the captured page (CSS px of a 1440x900 viewport) ----------
+  const input = center(B.input, { x: 400, y: 795 });
+  const approveBtn = center(B.approve, { x: 330, y: 640 });
+  const approvalCard = center(B.approvalCard, { x: 417, y: 600 });
+  const keeperBox = B.keeper ? { x: B.keeper.x + 320, y: B.keeper.y + 50 } : { x: 720, y: 319 };
+  const DEVICE_CAPTION = { x: 417, y: 560 };
+  const FULL = { cx: 720, cy: 450, z: 0.94 };
+  const TYPING = { cx: 560, cy: 560, z: 1.2 };
+  const TRACE_TOP = { cx: 1137, cy: 440, z: 2.0 };
+
+  // ---------- shots: what the window shows ----------
+  const shots = [];
+  const show = (t, name, opts = {}) => shots.push({ t, src: shotFile(name), cut: !!opts.cut });
+  const typeSeq = (name, t0, t1) => {
+    const frames = manifest.typing[name] ?? [];
+    frames.forEach((file, i) => shots.push({ t: t0 + ((t1 - t0) * i) / Math.max(1, frames.length - 1), src: `assets/${file}`, cut: true }));
+  };
+  const clip = manifest.clips['office-clip'] ?? [];
+
+  show(0, 'alexa-idle');
+  // 01 memory
+  show(T2 + 1.0, 'alexa-idle', { cut: true });
+  typeSeq('remember', T2 + 2.1, T2 + 3.5);
+  show(T2 + 3.6, 'remember-after-0', { cut: true });
+  show(T2 + 4.2, 'remember-after-1');
+  show(T2 + 5.1, 'remember-after-2');
+  show(T2 + 6.4, 'remember-after-3');
+  // 02 recall and briefing
+  show(T3 + 1.0, 'remember-after-3', { cut: true });
+  typeSeq('recall', T3 + 1.45, T3 + 2.25);
+  show(T3 + 2.3, 'recall-after-0', { cut: true });
+  show(T3 + 2.85, 'recall-after-2');
+  show(T3 + 3.4, 'recall-after-3');
+  typeSeq('briefing', T3 + 3.85, T3 + 4.5);
+  show(T3 + 4.55, 'briefing-after-0', { cut: true });
+  show(T3 + 5.05, 'briefing-after-2');
+  show(T3 + 5.8, 'briefing-after-3');
+  // 03 lists and reminders
+  show(T4 + 0.9, 'briefing-after-3', { cut: true });
+  typeSeq('shopping', T4 + 1.25, T4 + 1.85);
+  show(T4 + 1.9, 'shopping-after-0', { cut: true });
+  show(T4 + 2.35, 'shopping-after-2');
+  typeSeq('reminder', T4 + 2.95, T4 + 3.65);
+  show(T4 + 3.7, 'reminder-after-0', { cut: true });
+  show(T4 + 4.3, 'reminder-after-2');
+  show(T4 + 4.9, 'reminder-after-3');
+  // 04 ask first
+  show(T5 + 1.0, 'reminder-after-3', { cut: true });
+  typeSeq('plan', T5 + 1.35, T5 + 2.3);
+  show(T5 + 2.35, 'plan-after-0', { cut: true });
+  show(T5 + 2.9, 'plan-after-1');
+  show(T5 + 3.6, 'plan-approval');
+  show(T5 + 6.75, 'plan-approved-0');
+  show(T5 + 7.8, 'plan-approved-1');
+  // 05 the team (live office, then the run)
+  const CLIP_AT = T6 + 1.0;
+  show(T6 + 4.2, 'office-run-0');
+  show(T6 + 7.0, 'office-run-1');
+  show(T6 + 9.5, 'office-done');
+  // 06 household panel
+  show(T7 + 1.0, 'household-panel', { cut: true });
+  // 07 under the hood
+  show(T8 + 1.0, manifest.shots['plan-finished'] ? 'plan-finished' : 'plan-approved-1', { cut: true });
+  shots.sort((a, b) => a.t - b.t);
+
+  // ---------- camera ----------
+  const cam = [
+    { t: 0, ...FULL },
+    { t: T2 + 1.0, ...TYPING },
+    { t: T2 + 6.5, ...TRACE_TOP },
+    { t: T3 + 0.9, ...TYPING },
+    { t: T3 + 2.9, cx: DEVICE_CAPTION.x, cy: DEVICE_CAPTION.y, z: 1.6 },
+    { t: T3 + 3.7, ...TYPING },
+    { t: T3 + 5.3, cx: DEVICE_CAPTION.x, cy: DEVICE_CAPTION.y, z: 1.6 },
+    { t: T4 + 0.9, ...TYPING },
+    { t: T4 + 4.4, ...TRACE_TOP, z: 1.85 },
+    { t: T5 + 0.9, ...TYPING },
+    { t: T5 + 3.75, cx: approvalCard.x, cy: approvalCard.y - 50, z: 1.65 },
+    { t: T5 + 6.9, cx: DEVICE_CAPTION.x, cy: DEVICE_CAPTION.y, z: 1.5 },
+    { t: T6 + 0.9, cx: 720, cy: 405, z: 1.8 },
+    { t: T6 + 4.1, cx: 718, cy: 440, z: 1.6 },
+    { t: T6 + 9.4, cx: keeperBox.x, cy: keeperBox.y, z: 1.65 },
+    { t: T7 + 0.9, cx: 720, cy: 450, z: 1.0 },
+    { t: T7 + 1.9, cx: 720, cy: 400, z: 1.7 },
+    { t: T8 + 0.9, cx: 1060, cy: 500, z: 1.55 },
+    { t: T8 + 5.0, cx: 1060, cy: 540, z: 1.6 },
+    { t: T9, ...FULL, z: 0.8 },
+  ];
+  const camX = springTrack(cam, 'cx', 0.7);
+  const camY = springTrack(cam, 'cy', 0.7);
+  const camZ = springTrack(cam, 'z', 0.7);
+
+  // ---------- window on screen ----------
+  const winOn = [[T1 + 8.6, T2], [T2 + 1.0, T3], [T3 + 0.9, T4], [T4 + 0.85, T5], [T5 + 0.95, T6], [T6 + 1.0, T7], [T7 + 0.95, T8], [T8 + 1.0, T9 + 0.2]];
+  function winAlpha(t) {
+    for (const [a, b] of winOn) {
+      if (t >= a - 0.01 && t <= b + 0.01) return Math.min(ease(seg(t, a, a + 0.45)), 1 - ease(seg(t, b - 0.35, b)));
+    }
+    return 0;
+  }
+
+  // ---------- cursor ----------
+  const cursorKeys = [
+    { t: 0, x: 900, y: 700 },
+    { t: T2 + 1.4, x: 900, y: 700 }, { t: T2 + 1.5, x: input.x + 40, y: input.y + 8 },
+    { t: T3 + 1.15, x: input.x + 40, y: input.y + 8 },
+    { t: T5 + 4.6, x: approvalCard.x + 260, y: approvalCard.y + 140 }, { t: T5 + 5.4, x: approveBtn.x, y: approveBtn.y + 4 },
+  ];
+  const curX = springTrack(cursorKeys, 'x', 1.1);
+  const curY = springTrack(cursorKeys, 'y', 1.1);
+  const cursorOn = [[T2 + 1.35, T2 + 3.9], [T3 + 1.1, T3 + 1.6], [T3 + 3.6, T3 + 3.95], [T4 + 1.0, T4 + 1.35], [T4 + 2.7, T4 + 3.05], [T5 + 1.1, T5 + 1.5], [T5 + 4.5, T5 + 7.2]];
+  const clicks = [T2 + 2.0, T3 + 1.4, T3 + 3.8, T4 + 1.2, T4 + 2.9, T5 + 1.3, T5 + 6.6];
+
+  // ---------- titles ----------
+  const titles = [
+    { t0: T1 + 0.15, t1: T1 + 5.0, lines: [{ text: 'Simple household jobs' }, { text: 'still break' }] },
+    { t0: T1 + 5.3, t1: T1 + 8.7, lines: [{ text: 'AGORA+', cls: 'big' }, { text: 'Remembers · Asks first · Proves it', cls: 'sub' }] },
+    { t0: T2 + 0.05, t1: T2 + 1.25, kicker: '01 · Memory', lines: [{ text: 'Tell it once' }] },
+    { t0: T3 + 0.05, t1: T3 + 1.15, kicker: '02 · Recall', lines: [{ text: 'Answers from memory' }] },
+    { t0: T4 + 0.05, t1: T4 + 1.05, kicker: '03 · Lists', lines: [{ text: 'Lists that speak up' }] },
+    { t0: T5 + 0.05, t1: T5 + 1.15, kicker: '04 · Approval', lines: [{ text: 'It asks first' }] },
+    { t0: T6 + 0.05, t1: T6 + 1.2, kicker: '05 · Team', lines: [{ text: 'A team, not a chatbot' }] },
+    { t0: T7 + 0.05, t1: T7 + 1.15, kicker: '06 · Household', lines: [{ text: 'Yours to read and edit' }] },
+    { t0: T8 + 0.05, t1: T8 + 1.2, kicker: '07 · Open standard', lines: [{ text: 'One brain, every assistant' }] },
+    { t0: T9 + 0.45, t1: 999, lines: [{ text: 'AGORA+', cls: 'big' }, { text: 'Remembers · Asks first · Proves it', cls: 'sub' }, { text: 'Open source · Amazon Developer Hackathon 2026', cls: 'foot' }] },
+  ];
+  const titleRoot = document.getElementById('titles');
+  for (const title of titles) {
+    const el = document.createElement('div');
+    el.className = 'title';
+    if (title.kicker) {
+      const k = document.createElement('div');
+      k.className = 'kicker';
+      k.innerHTML = `<span class="w"><span>${title.kicker}</span></span>`;
+      el.appendChild(k);
+    }
+    for (const line of title.lines) {
+      const l = document.createElement('div');
+      l.className = `line ${line.cls ?? ''}`;
+      l.innerHTML = line.text.split(' ').map((word) => `<span class="w"><span>${word === 'AGORA+' ? 'AGORA<span class="plus">+</span>' : word}</span></span>`).join('');
+      el.appendChild(l);
+    }
+    titleRoot.appendChild(el);
+    title.el = el;
+    title.words = [...el.querySelectorAll('.w > span')];
+  }
+
+  // ---------- callouts, anchored to points on the page ----------
+  const callouts = [
+    { t0: T2 + 8.5, t1: T3 - 0.3, text: 'Verified means read back from disk', at: { x: 880, y: 372 }, dx: 30, dy: 96 },
+    { t0: T5 + 7.4, t1: T5 + 11.3, text: 'Only a person can approve', at: { x: DEVICE_CAPTION.x, y: 330 }, dx: -230, dy: -40 },
+    { t0: T8 + 2.0, t1: T9 - 0.2, text: 'Real MCP tool calls over Streamable HTTP', screen: { x: 110, y: 380 } },
+    { t0: T8 + 3.9, t1: T9 - 0.2, text: 'OAuth account linking with PKCE', screen: { x: 110, y: 480 } },
+    { t0: T8 + 5.8, t1: T9 - 0.2, text: 'Alexa+ add-ons and other assistants', screen: { x: 110, y: 580 } },
+  ];
+  const calloutRoot = document.getElementById('callouts');
+  for (const c of callouts) {
+    const el = document.createElement('div');
+    el.className = 'callout';
+    el.innerHTML = `<i></i><span>${c.text}</span>`;
+    calloutRoot.appendChild(el);
+    c.el = el;
+  }
+
+  // ---------- frame ----------
+  const win = document.getElementById('win');
+  const imgA = document.getElementById('imgA');
+  const imgB = document.getElementById('imgB');
+  const cursor = document.getElementById('cursor');
+  const decodeCache = new Map();
+  async function setImg(img, src) {
+    if (img.dataset.src !== src) {
+      img.dataset.src = src;
+      img.src = src;
+    }
+    if (!decodeCache.get(src)) {
+      try { await img.decode(); decodeCache.set(src, true); } catch { /* the next frame retries */ }
+    }
+  }
+
+  function currentShot(t) {
+    // The live office clip plays inside its window of time.
+    if (t >= CLIP_AT && t < T6 + 4.2 && clip.length) {
+      const dt = t - CLIP_AT;
+      let lo = 0;
+      let hi = clip.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (clip[mid].t <= dt) lo = mid; else hi = mid - 1; }
+      const src = `assets/${clip[Math.min(lo, clip.length - 1)].file}`;
+      return { cur: src, prev: src, alpha: 1 };
+    }
+    let i = 0;
+    for (let k = 0; k < shots.length; k++) if (shots[k].t <= t) i = k;
+    const cur = shots[i];
+    const prev = shots[Math.max(0, i - 1)];
+    const alpha = cur.cut ? 1 : ease(seg(t, cur.t, cur.t + 0.22));
+    return { cur: cur.src, prev: prev.src, alpha };
+  }
+
+  function wordState(title, t) {
+    const n = title.words.length;
+    title.words.forEach((w, i) => {
+      const inP = spring(t - (title.t0 + i * 0.06), 1.3, 0.9);
+      const outP = ease(seg(t, title.t1 - 0.38 + i * 0.025, title.t1 - 0.06 + i * 0.025));
+      const y = (1 - inP) * 112 - outP * 112;
+      w.style.transform = `translateY(${y}%)`;
+    });
+    const on = t >= title.t0 - 0.05 && t <= title.t1 + 0.1;
+    title.el.style.display = on ? 'flex' : 'none';
+    return n;
+  }
+
+  window.seek = async (t) => {
+    const z = camZ(t);
+    const cx = camX(t);
+    const cy = camY(t);
+    const toScreen = (p) => ({ x: 960 + (p.x - cx) * z, y: 560 + (p.y - cy) * z });
+
+    // Window: camera transform, fade, a short blur on the way in and out.
+    const a = winAlpha(t);
+    const settle = 1 - a;
+    win.style.transform = `translate(${960 - cx * z}px, ${560 - cy * z + settle * 26}px) scale(${z * (1 - settle * 0.025)})`;
+    win.style.opacity = String(a);
+    win.style.filter = settle > 0.01 ? `blur(${(settle * 9).toFixed(2)}px)` : 'none';
+    win.style.display = a > 0.002 ? 'block' : 'none';
+
+    const s = currentShot(t);
+    const work = [];
+    if (a > 0.002) {
+      work.push(setImg(imgA, s.prev), setImg(imgB, s.cur));
+      imgB.style.opacity = String(s.alpha);
+    }
+
+    for (const title of titles) wordState(title, t);
+    const scrim = Math.min(ease(seg(t, T8 + 1.0, T8 + 1.8)), 1 - ease(seg(t, T9 - 0.4, T9 + 0.1)));
+    document.getElementById('scrim').style.opacity = String(Math.max(0, scrim));
+
+    for (const c of callouts) {
+      const p = spring(t - c.t0, 1.2, 0.9);
+      const q = ease(seg(t, c.t1 - 0.35, c.t1));
+      const alpha = clamp01(p) * (1 - q);
+      c.el.style.display = alpha > 0.003 ? 'flex' : 'none';
+      if (alpha <= 0.003) continue;
+      const pos = c.screen ?? (() => { const sp = toScreen(c.at); return { x: sp.x + (c.dx ?? 0), y: sp.y + (c.dy ?? 0) }; })();
+      c.el.style.opacity = String(alpha);
+      c.el.style.transform = `translate(${pos.x}px, ${pos.y + (1 - p) * 18}px)`;
+    }
+
+    let cursorAlpha = 0;
+    for (const [c0, c1] of cursorOn) if (t >= c0 && t <= c1) cursorAlpha = Math.min(ease(seg(t, c0, c0 + 0.2)), 1 - ease(seg(t, c1 - 0.2, c1)));
+    cursorAlpha *= a;
+    if (cursorAlpha > 0.003) {
+      const p = toScreen({ x: curX(t), y: curY(t) });
+      let press = 1;
+      for (const k of clicks) press = Math.min(press, 1 - 0.16 * Math.sin(Math.PI * seg(t, k - 0.06, k + 0.16)));
+      cursor.style.display = 'block';
+      cursor.style.opacity = String(cursorAlpha);
+      cursor.style.transform = `translate(${p.x - 6}px, ${p.y - 3}px) scale(${press})`;
+    } else cursor.style.display = 'none';
+
+    await Promise.all(work);
+  };
+
+  await document.fonts.ready;
+  const params = new URLSearchParams(location.search);
+  if (!params.has('render')) {
+    const stage = document.getElementById('stage');
+    const fit = () => { stage.style.transform = `scale(${Math.min(innerWidth / 1920, innerHeight / 1080)})`; };
+    addEventListener('resize', fit);
+    fit();
+    const audio = window.AUDIO_CUES.map((c) => Object.assign(new Audio(c.file), { _at: c.at }));
+    const start = performance.now() - (Number(params.get('t')) || 0) * 1000;
+    let busy = false;
+    const loop = async () => {
+      const t = (performance.now() - start) / 1000;
+      if (!busy) { busy = true; await window.seek(Math.min(t, window.DURATION)); busy = false; }
+      for (const clipAudio of audio) if (!clipAudio._played && t >= clipAudio._at) { clipAudio._played = true; clipAudio.play().catch(() => {}); }
+      if (t < window.DURATION) requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+  await window.seek(0);
+  window.ready = true;
+})();
+</script>
+</body>
+</html>
