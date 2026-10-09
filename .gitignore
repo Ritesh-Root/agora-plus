@@ -23,3 +23,6 @@ frontend/
 memory/
 test_reports/
 .agora-data/
+
+# Review frames from video/render.mjs
+video/stills/
