@@ -1,6 +1,6 @@
 # Devpost fields
 
-Copy the text under each heading. Placeholders are in angle brackets. Do not invent a public URL. The repository that exists today is https://github.com/Ritesh-Root/agora ([package.json](../package.json)). The hackathon entry is a new public MIT repo. Its URL is not published from this workspace.
+Copy the text under each heading. Placeholders are in angle brackets. The hackathon entry is the public MIT repo https://github.com/Ritesh-Root/agora-plus. It carries the full history, including the original AGORA work (https://github.com/Ritesh-Root/agora); the tag `pre-window` marks where the submission window starts.
 
 Measured latencies below are the local fast path with no AWS credentials. Model-path and Polly numbers are `TODO(measure)`. Sources for the customer lines are [docs/research/alexa-plus-voice-of-customer.md](research/alexa-plus-voice-of-customer.md) and [docs/research/sources.json](research/sources.json).
 
@@ -60,9 +60,7 @@ From [package.json](../package.json) and the server code:
 
 ## Repo URL
 
-`<REPO_URL>`
-
-Suggested shape once the public repo exists: `https://github.com/<GITHUB_USERNAME>/agora-plus`
+https://github.com/Ritesh-Root/agora-plus
 
 History starts from AGORA. The pre-window tag is `pre-window` at commit `4f61371` (2026-08-20).
 
@@ -92,11 +90,11 @@ A live Bedrock call and a successful Polly synthesize were not recorded. The bui
 
 ## Open Source field
 
-**Contribution URL:** `<CONTRIBUTION_URL>`
+**Contribution URL:** https://github.com/Ritesh-Root/agora-plus/compare/pre-window...main (everything since the window opened)
 
-**Repo URL:** `<REPO_URL>`
+**Repo URL:** https://github.com/Ritesh-Root/agora-plus
 
-**GitHub username:** `<GITHUB_USERNAME>`
+**GitHub username:** Ritesh-Root
 
 **Description:**
 
@@ -108,7 +106,7 @@ The code license is [LICENSE](../LICENSE) (MIT). Files under `public/models/` ar
 
 ## Product feedback
 
-**Link:** [docs/FEEDBACK.md](FEEDBACK.md) in the repo (`<REPO_URL>/blob/alexa-hackathon/docs/FEEDBACK.md` once the remote exists).
+**Link:** https://github.com/Ritesh-Root/agora-plus/blob/main/docs/FEEDBACK.md
 
 **Summary:**
 

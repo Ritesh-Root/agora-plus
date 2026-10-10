@@ -56,7 +56,7 @@ Still to capture, under `docs/images/`:
 You need Node.js and npm. The [Dockerfile](Dockerfile) uses Node 22. The repository does not declare an engines field.
 
 ```bash
-git clone <REPO_URL>
+git clone https://github.com/Ritesh-Root/agora-plus.git
 cd agora-plus
 npm ci
 cp .env.example .env
@@ -347,4 +347,4 @@ Third-party code and assets have their own notices. Those notices stay in the fi
 
 Maintainer: Ritesh-Root &lt;workstationritalks@gmail.com&gt; · https://github.com/Ritesh-Root
 
-Repository: https://github.com/Ritesh-Root/agora
+Repository: https://github.com/Ritesh-Root/agora-plus · built on AGORA, https://github.com/Ritesh-Root/agora
