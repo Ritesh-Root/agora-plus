@@ -37,7 +37,7 @@ test('the office canvas is visible and the agents move', async ({ page }, info) 
     errors.push(text);
   });
 
-  await page.goto('/?renderer=webgl');
+  await page.goto('/office?renderer=webgl');
   const canvas = page.locator('[data-testid="office-canvas"]');
   await expect(canvas).toBeVisible();
   await expect(page.locator('[data-testid="renderer-badge"]')).toContainText(/WebGL2|WebGPU|2D/);

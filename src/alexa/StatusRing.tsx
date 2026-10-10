@@ -1,7 +1,7 @@
 export type RingState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'approval' | 'error';
 
 export const RING_LABEL: Record<RingState, string> = {
-  idle: 'Idle',
+  idle: 'Ready',
   listening: 'Listening',
   thinking: 'Thinking',
   speaking: 'Speaking',
@@ -10,31 +10,31 @@ export const RING_LABEL: Record<RingState, string> = {
 };
 
 const RING_CSS = `
-.agora-ring { width: 8.5rem; height: 8.5rem; border-radius: 999px; display: grid; place-items: center; border: 2px solid rgba(252,250,244,0.18); transition: width 200ms ease, height 200ms ease; }
-.agora-ring-core { width: 6.4rem; height: 6.4rem; border-radius: 999px; border: 7px solid #17150f; box-shadow: inset 0 0 0 2px rgba(242,204,70,0.45); background: #17150f; transition: width 200ms ease, height 200ms ease, box-shadow 200ms ease; }
-@media (min-width: 1024px) {
-  /* Scales with screen height so short laptop screens keep the caption and approval card in view. */
-  .agora-ring { width: clamp(6.5rem, 22dvh, 14rem); height: clamp(6.5rem, 22dvh, 14rem); }
-  .agora-ring-core { width: 75%; height: 75%; border-width: 10px; }
-  /* The approval card needs the room while a yes is pending. */
-  .agora-ring.agora-ring-approval { width: clamp(5rem, 13dvh, 9rem); height: clamp(5rem, 13dvh, 9rem); }
-  .agora-ring-approval .agora-ring-core { border-width: 7px; }
-}
-.agora-ring-listening .agora-ring-core { box-shadow: 0 0 0 7px rgba(242,204,70,0.35); animation: agora-pulse 1.3s ease-in-out infinite; }
-.agora-ring-speaking .agora-ring-core { box-shadow: 0 0 0 6px rgba(242,204,70,0.55); }
-.agora-ring-thinking .agora-ring-core { border-top-color: #f2cc46; animation: agora-spin 1s linear infinite; }
-.agora-ring-approval .agora-ring-core { box-shadow: 0 0 0 8px rgba(217,175,27,0.55); animation: agora-pulse 1.1s ease-in-out infinite; }
-.agora-ring-error .agora-ring-core { border-style: dashed; border-color: #f2cc46; }
+.agora-ring { position: relative; width: 7.5rem; height: 7.5rem; border-radius: 999px; display: grid; place-items: center; background: #fcfaf4; box-shadow: 0 0 0 8px rgba(242,204,70,0.38); transition: box-shadow 200ms ease; }
+.agora-ring-core { position: relative; width: 5.35rem; height: 5.35rem; border-radius: 999px; background: #fcfaf4; box-shadow: inset 0 0 0 7px #f2cc46; }
+.agora-ring-sweep { position: absolute; inset: 0; border-radius: inherit; opacity: 0; }
+.agora-ring-listening { animation: agora-pulse 1.3s ease-in-out infinite; }
+.agora-ring-thinking .agora-ring-sweep { opacity: 1; background: conic-gradient(from 0deg, transparent 0 58%, #f2cc46 82%, transparent 100%); animation: agora-spin 2.4s linear infinite; mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 7px)); }
+.agora-ring-speaking { animation: agora-wave 1.15s ease-in-out infinite; }
+.agora-ring-approval { box-shadow: 0 0 0 8px rgba(217,175,27,0.72); animation: agora-pulse 1.1s ease-in-out infinite; }
+.agora-ring-approval .agora-ring-core { box-shadow: inset 0 0 0 7px #d9af1b; }
+.agora-ring-error { box-shadow: 0 0 0 8px rgba(196,85,58,0.4); }
+.agora-ring-error .agora-ring-core { box-shadow: inset 0 0 0 7px #c4553a; }
 @keyframes agora-spin { to { transform: rotate(360deg); } }
-@keyframes agora-pulse { 50% { box-shadow: 0 0 0 2px rgba(242,204,70,0.18); } }
+@keyframes agora-pulse { 50% { box-shadow: 0 0 0 3px rgba(242,204,70,0.22); } }
+@keyframes agora-wave {
+  0%, 100% { box-shadow: 0 0 0 8px rgba(242,204,70,0.62); }
+  50% { box-shadow: 0 0 0 8px rgba(23,21,15,0.28); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .agora-ring, .agora-ring-core { animation: none !important; transition: none !important; }
+  .agora-ring, .agora-ring-core, .agora-ring-sweep { animation: none !important; transition: none !important; }
 }
 `;
 
 export function StatusRing({ state }: { state: RingState }) {
   return (
     <div className={`agora-ring agora-ring-${state}`} role="img" aria-label={RING_LABEL[state]}>
+      <div className="agora-ring-sweep" />
       <div className="agora-ring-core" />
       <style>{RING_CSS}</style>
     </div>

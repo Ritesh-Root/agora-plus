@@ -166,13 +166,32 @@ function keeperFlag(tasks: { role: string; output?: string }[]): string {
     .slice(0, 500);
 }
 
+/**
+ * The one sentence of Keeper's note worth hearing: the first that names an allergy or a conflict,
+ * without report headings such as "Conflicts Identified:" in front of it.
+ */
+export function keeperLine(flag: string): string {
+  const plain = toSpeech(flag, { maxSentences: 12, maxChars: 2000 });
+  const sentences = plain.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)?.map((part) => part.trim()).filter(Boolean) ?? [];
+  const unlabelled = sentences.map((sentence) => {
+    let text = sentence;
+    // Short title-like labels ending in a colon ("Timing Conflict with Swimming:") are headings, not speech.
+    for (let label = text.match(/^([A-Z][^:.!?]{0,40}):\s+/); label && label[1].split(/\s+/).length <= 5; label = text.match(/^([A-Z][^:.!?]{0,40}):\s+/)) {
+      text = text.slice(label[0].length);
+    }
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  });
+  const pick = unlabelled.find((sentence) => /\b(conflict|allerg)/i.test(sentence)) ?? unlabelled[0] ?? '';
+  return toSpeech(pick, { maxSentences: 1, maxChars: 140 });
+}
+
 /** Keep a flagged allergy or conflict inside the two sentences someone will hear. */
 function withFlag(speech: string, flag: string): string {
   if (!flag) return toSpeech(speech);
   const allergy = /allerg/i.test(flag);
   if (allergy && /allerg/i.test(speech)) return toSpeech(speech);
   if (!allergy && /conflict/i.test(speech)) return toSpeech(speech);
-  const extra = toSpeech(flag, { maxSentences: 1, maxChars: 140 });
+  const extra = keeperLine(flag);
   const base = toSpeech(speech, { maxSentences: 1, maxChars: 160 });
   if (!extra) return base;
   if (!base) return extra;
@@ -281,9 +300,10 @@ async function persistFinished(
   runId: string,
   status: 'complete' | 'needs_revision' | 'stopped',
   snapshot: RunSnapshot,
+  error?: string,
 ): Promise<void> {
   await writeText(`runs/${runId}.md`, snapshot.synthesis);
-  await writeJson(`runs/${runId}.json`, finishedRecord(runId, status, snapshot));
+  await writeJson(`runs/${runId}.json`, finishedRecord(runId, status, snapshot, error));
 }
 
 /** Returns a spoken error when the file could not be written. The run still keeps that error. */
@@ -291,10 +311,12 @@ async function saveFinished(
   runId: string,
   status: 'complete' | 'needs_revision' | 'stopped',
   snapshot: RunSnapshot,
+  /** Why the run ended early, kept on the record so Home and the voice can say it. */
+  reason?: string,
 ): Promise<string | null> {
   closing.add(runId);
   try {
-    await persistFinished(runId, status, snapshot);
+    await persistFinished(runId, status, snapshot, reason);
     unsaved.delete(runId);
     return null;
   } catch (error) {
@@ -604,7 +626,7 @@ export async function startSocietyRun(input: {
       const snapshot = roomSnapshot(runId, input.brief);
       const spokenSummary = await householdSpokenSummary(input.source, provider, snapshot.synthesis, snapshot.tasks);
       if (spokenSummary) room.noteSpokenSummary(runId, spokenSummary);
-      const saveError = await saveFinished(runId, 'stopped', { ...snapshot, spokenSummary });
+      const saveError = await saveFinished(runId, 'stopped', { ...snapshot, spokenSummary }, publicModelError(err));
       if (saveError) deliver({ type: 'society-error', error: saveError });
     }
   }).finally(() => {

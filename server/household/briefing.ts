@@ -102,7 +102,7 @@ export function buildBriefing(input: {
     items.push(`${plural(input.pendingApprovals.length, 'approval')} waiting.`);
   }
   if (finishedRecently.length > 0) {
-    items.push(`${plural(finishedRecently.length, 'run')} finished in the last 24 hours.`);
+    items.push(`${plural(finishedRecently.length, 'plan')} finished in the last 24 hours.`);
   }
 
   const speechOverdue = overdue.filter((task) => !reminded.has(task.id));

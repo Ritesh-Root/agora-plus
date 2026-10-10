@@ -9,6 +9,8 @@ import {
   householdSnapshot,
   remember,
   addTask,
+  reopenTask,
+  removeTask,
   setServerProviderFactory,
 } from './household/actions';
 import { resolveApproval } from './household/approvals';
@@ -34,6 +36,8 @@ type Match =
   | { kind: 'memory-id'; id: string }
   | { kind: 'tasks' }
   | { kind: 'task-complete'; id: string }
+  | { kind: 'task-reopen'; id: string }
+  | { kind: 'task-remove'; id: string }
   | { kind: 'approval'; id: string }
   | { kind: 'session' }
   | { kind: 'tts' }
@@ -75,6 +79,16 @@ function matchPath(pathname: string): Match | 'bad-id' | null {
   if (task) {
     const id = safeId(task[1]);
     return id ? { kind: 'task-complete', id } : 'bad-id';
+  }
+  const reopen = pathname.match(/^\/api\/tasks\/([^/]+)\/reopen$/);
+  if (reopen) {
+    const id = safeId(reopen[1]);
+    return id ? { kind: 'task-reopen', id } : 'bad-id';
+  }
+  const taskItem = pathname.match(/^\/api\/tasks\/([^/]+)$/);
+  if (taskItem) {
+    const id = safeId(taskItem[1]);
+    return id ? { kind: 'task-remove', id } : 'bad-id';
   }
   const approval = pathname.match(/^\/api\/approvals\/([^/]+)$/);
   if (approval) {
@@ -421,6 +435,28 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
     }
     resume(req);
     const result = await completeTask(match.id);
+    sendJson(res, result.ok ? 200 : 404, result);
+    return;
+  }
+
+  if (match.kind === 'task-reopen') {
+    if (method !== 'POST') {
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    resume(req);
+    const result = await reopenTask(match.id);
+    sendJson(res, result.ok ? 200 : 404, result);
+    return;
+  }
+
+  if (match.kind === 'task-remove') {
+    if (method !== 'DELETE') {
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    resume(req);
+    const result = await removeTask(match.id);
     sendJson(res, result.ok ? 200 : 404, result);
     return;
   }

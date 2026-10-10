@@ -1,6 +1,6 @@
 # Demo script
 
-Target length: under 2:55. Record in Chrome. Open on `/alexa`. The office is `/`. Stop before 2:55.
+Target length: under 2:55. Record in Chrome. Open on `/` for the household Home. The office is `/office`. Stop before 2:55.
 
 Do not put article sentences on screen. Say the complaints in our own words. The dated sources are in [README.md](../README.md) (Spyglass, 30 Sep 2025, up to 15 seconds; The Verge, 8 Oct 2026, three to five seconds for timers and weather; Wired, 6 Mar 2026; Consumer Reports, 19 Dec 2025).
 
@@ -13,7 +13,7 @@ Say the page is an unofficial simulated Alexa+ experience. Do not show a light, 
 
 ## 0:00 — Hook (about 12 seconds)
 
-**On screen.** `/alexa`. Three lines in our words, no article text:
+**On screen.** `/`. Three lines in our words, no article text:
 
 - Simple commands are still slow.
 - Multi-step jobs stop halfway.
@@ -72,9 +72,9 @@ Record this beat with Bedrock so the steps are real.
 
 **Say.** "It shows the steps and waits. The model cannot approve this. I did."
 
-## 1:24 — Office (about 22 seconds)
+## 1:24 — The team (about 22 seconds)
 
-**On screen.** `/`, the office. The roster is Agora, Scout, Planner, and Keeper, not Creative Studio ([src/data/agents.ts](../src/data/agents.ts), [server/household/team.ts](../server/household/team.ts)). Open the Society panel. When the run leaves `running`, the panel shows one line: "Keeper says" if it mentions an allergy or a conflict, otherwise "Spoken summary". Back on `/alexa`, that same `spokenSummary` is spoken once.
+**On screen.** `/`, the Plans card. While the run is going it lists Agora, Scout, Planner, and Keeper and each step with its status ([src/home/PlansCard.tsx](../src/home/PlansCard.tsx), [server/household/team.ts](../server/household/team.ts)). When the run leaves `running`, the card shows the spoken summary with an allergy or a conflict in red, the team that made it, and "Read plan". That same `spokenSummary` is spoken once. The 3D view of the same run is optional at `/office` (footer link "Team view (3D)").
 
 **Say.** "Agora, Scout, Planner, and Keeper. The line on screen is the one the house hears."
 

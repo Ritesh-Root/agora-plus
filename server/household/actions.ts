@@ -21,7 +21,7 @@ import {
   type HouseholdSource,
   type MemoryEntry,
 } from './memoryStore';
-import { addTask as createTask, completeTask as finishTask, listTasks as readTasks, type TaskFields } from './taskStore';
+import { addTask as createTask, completeTask as finishTask, listTasks as readTasks, reopenTask as reopenStored, removeTask as removeStored, type TaskFields } from './taskStore';
 import { toSpeech } from './speech';
 import { HOUSEHOLD_TEAM } from './team';
 
@@ -209,6 +209,21 @@ export async function completeTask(idOrTitle: string) {
   const back = (await readTasks()).find((item) => item.id === task.id);
   const verified = !!back && back.status === 'done' && back.completedAt === task.completedAt;
   return { ok: true as const, task, receipt: receipt('complete_task', task.id, verified) };
+}
+
+export async function reopenTask(id: string) {
+  const task = await reopenStored(id);
+  if (!task) return { ok: false as const, error: 'Task not found.' };
+  const back = (await readTasks()).find((item) => item.id === task.id);
+  const verified = !!back && back.status === 'open' && back.completedAt === undefined;
+  return { ok: true as const, task, receipt: receipt('reopen_task', task.id, verified) };
+}
+
+export async function removeTask(id: string) {
+  const task = await removeStored(id);
+  if (!task) return { ok: false as const, error: 'Task not found.' };
+  const verified = !(await readTasks()).some((item) => item.id === task.id);
+  return { ok: true as const, task, receipt: receipt('remove_task', task.id, verified) };
 }
 
 async function briefingInput() {
@@ -601,6 +616,7 @@ export async function householdSnapshot() {
     tasks: input.tasks,
     pendingApprovals: input.pendingApprovals,
     recentRuns: input.recentRuns,
+    briefing: briefing.items,
     suggestions: briefing.suggestions,
   };
 }

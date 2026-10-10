@@ -25,4 +25,10 @@ describe('toSpeech', () => {
     expect(spoken).toBe('alpha beta');
     expect(spoken.length).toBeLessThanOrEqual(12);
   });
+
+  it('drops a whole sentence before cutting one mid-thought', () => {
+    const first = 'This week has lentil soup, stir-fry, and peanut-free falafel wraps for everyone at home tonight.';
+    const spoken = toSpeech(`${first} All dishes are carefully chosen to ensure that nobody at the table is left out.`, { maxChars: 120 });
+    expect(spoken).toBe(first);
+  });
 });

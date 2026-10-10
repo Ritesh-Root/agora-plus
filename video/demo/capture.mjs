@@ -116,7 +116,7 @@ async function screencast(page, name, seconds) {
 
 // ---- office: join first, so a household run animates here ----
 const office = await ctx.newPage();
-await office.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+await office.goto(`${BASE}/office`, { waitUntil: 'networkidle' });
 await office.locator('input[placeholder="e.g. Alex"]').fill('Ritesh');
 await office.getByRole('button', { name: 'Join', exact: true }).click();
 await sleep(4000);
@@ -150,6 +150,7 @@ if (FROM === 'start') await shot(voice, 'alexa-idle');
 const input = voice.locator('#alexa-utterance');
 await box(voice, input, 'input');
 await box(voice, voice.locator('#talk-btn'), 'talk');
+await voice.getByRole('button', { name: 'Under the hood' }).click();
 await box(voice, voice.locator('[data-testid="alexa-trace"]'), 'trace');
 await box(voice, voice.locator('[data-testid="alexa-device"]'), 'device');
 

@@ -36,9 +36,10 @@ test('the voice simulator remembers, shops, briefs, and forgets only on a plain 
   page.on('pageerror', (error) => errors.push(error.message));
 
   await finishSpeechImmediately(page);
-  await page.goto('/alexa');
+  await page.goto('/');
+  await expect(page).toHaveTitle(/AGORA\+ Home/);
   await expect(page.getByText('Linked')).toBeVisible();
-  await expect(page).toHaveTitle(/AGORA\+ voice/);
+  await page.getByRole('button', { name: 'Under the hood' }).click();
 
   await say(page, 'Remember Mia is allergic to peanuts');
   await expect(page.getByText('verified ✓').first()).toBeVisible();
@@ -49,14 +50,8 @@ test('the voice simulator remembers, shops, briefs, and forgets only on a plain 
 
   await say(page, 'Add milk to my shopping list');
   await expect(page.getByText('verified ✓').first()).toBeVisible();
-
-  const office = await page.context().newPage();
-  await office.goto('/');
-  await office.getByTestId('household-btn').click();
-  const panel = office.getByTestId('household-panel');
-  await expect(panel.getByRole('heading', { name: 'Shopping' })).toBeVisible();
-  await expect(panel.getByText('milk', { exact: true }).first()).toBeVisible();
-  await office.close();
+  await expect(page.getByRole('heading', { name: 'Shopping' })).toBeVisible();
+  await expect(page.getByText('milk', { exact: true }).first()).toBeVisible();
 
   await say(page, "What's my briefing?");
   await expect(spoken(page)).toContainText(/peanuts/i);
@@ -78,6 +73,16 @@ test('the voice simulator remembers, shops, briefs, and forgets only on a plain 
   await say(page, 'What is Mia allergic to?');
   await expect(spoken(page)).toContainText(/don.?t know/i);
   await expect(spoken(page)).not.toContainText(/peanuts/i);
+
+  const office = await page.context().newPage();
+  const officeErrors: string[] = [];
+  office.on('pageerror', (error) => officeErrors.push(error.message));
+  await office.goto('/office?renderer=webgl');
+  await expect(
+    office.getByTestId('office-canvas').or(office.getByTestId('join-name-input')).first(),
+  ).toBeVisible();
+  expect(officeErrors, officeErrors.join('\n')).toEqual([]);
+  await office.close();
 
   expect(errors, errors.join('\n')).toEqual([]);
 });

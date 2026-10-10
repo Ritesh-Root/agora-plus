@@ -141,3 +141,33 @@ export async function completeTask(idOrTitle: string): Promise<HouseholdTask | n
     return { ...task };
   });
 }
+
+/** Done becomes open. An id that is already open comes back unchanged. */
+export async function reopenTask(id: string): Promise<HouseholdTask | null> {
+  const needle = id.trim();
+  if (!needle) return null;
+  return exclusive(async () => {
+    const tasks = await readTasks();
+    const task = tasks.find((item) => item.id === needle);
+    if (!task) return null;
+    if (task.status === 'open') return { ...task };
+    task.status = 'open';
+    delete task.completedAt;
+    await writeJson(FILE, tasks);
+    return { ...task };
+  });
+}
+
+/** Drops the task. Unknown ids return null. */
+export async function removeTask(id: string): Promise<HouseholdTask | null> {
+  const needle = id.trim();
+  if (!needle) return null;
+  return exclusive(async () => {
+    const tasks = await readTasks();
+    const index = tasks.findIndex((item) => item.id === needle);
+    if (index < 0) return null;
+    const [removed] = tasks.splice(index, 1);
+    await writeJson(FILE, tasks);
+    return removed ? { ...removed } : null;
+  });
+}

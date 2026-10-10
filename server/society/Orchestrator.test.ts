@@ -72,6 +72,42 @@ describe('Society Orchestrator', () => {
   });
 });
 
+  it('escalates a worker whose model call fails and finishes the rest of the run', async () => {
+    const provider: LLMLike = {
+      async generateCompletion(messages, _tools, systemInstruction) {
+        if (systemInstruction?.includes('You are the Manager')) {
+          return {
+            content: JSON.stringify([
+              { id: 'a', title: 'Menu', role: 'Worker', prompt: 'write the menu' },
+              { id: 'b', title: 'Groceries', role: 'Worker', prompt: 'list the groceries' },
+            ]),
+          };
+        }
+        const text = JSON.stringify(messages);
+        if (systemInstruction?.includes('worker') && text.includes('list the groceries')) throw new Error('timeout');
+        return { content: 'Lentil soup on Monday, falafel wraps on Tuesday, and a vegetable lasagne on Wednesday.' };
+      },
+    };
+    const result = await runSociety('Plan dinners', provider, { judgeOutput: async () => 'accept' });
+    const failed = result.tasks.find((task) => task.id === 'b');
+    expect(failed?.status).toBe('escalated');
+    expect(failed?.failure).toBeInstanceOf(Error);
+    expect(result.tasks.find((task) => task.id === 'a')?.status).toBe('done');
+    expect(result.documentStatus).not.toBe('stopped');
+  });
+
+  it('still reports the model error when every worker call fails', async () => {
+    const provider: LLMLike = {
+      async generateCompletion(_messages, _tools, systemInstruction) {
+        if (systemInstruction?.includes('You are the Manager')) {
+          return { content: JSON.stringify([{ id: 'a', title: 'Menu', role: 'Worker', prompt: 'write the menu' }]) };
+        }
+        throw new Error('Inference API error (401): bad key');
+      },
+    };
+    await expect(runSociety('Plan dinners', provider)).rejects.toThrow('bad key');
+  });
+
   it('runs the selected team on each agent model', async () => {
     const calls: { model?: string; system?: string }[] = [];
     const noted: { stage: string; agent: string }[] = [];

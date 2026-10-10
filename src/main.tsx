@@ -8,17 +8,20 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
+const path = window.location.pathname;
+// Replays (`?replay=name`) are office recordings, so they open there too.
+const office = path === '/office' || path === '/office/' || new URLSearchParams(window.location.search).has('replay');
 
-if (window.location.pathname.startsWith('/alexa')) {
-  document.title = 'AGORA+ voice (unofficial Alexa+ simulator)';
-  const AlexaSimulator = lazy(() => import('./alexa/AlexaSimulator'));
-  root.render(
-    <Suspense fallback={null}>
-      <AlexaSimulator />
-    </Suspense>,
-  );
-} else {
+if (office) {
   void import('./App').then(({ default: App }) => {
     root.render(<App />);
   });
+} else {
+  document.title = 'AGORA+ Home';
+  const HomePage = lazy(() => import('./home/HomePage'));
+  root.render(
+    <Suspense fallback={<div className="min-h-dvh bg-[#f4f0e6]" />}>
+      <HomePage />
+    </Suspense>,
+  );
 }

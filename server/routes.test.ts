@@ -161,6 +161,20 @@ describe('household routes', () => {
     expect(done.status).toBe(200);
     expect(JSON.parse(done.body).task.status).toBe('done');
 
+    const reopened = await call('POST', `/api/tasks/${savedTask.task.id}/reopen`, { host: 'localhost:3000' });
+    expect(reopened.status).toBe(200);
+    const opened = JSON.parse(reopened.body) as { task: { status: string; completedAt?: string }; receipt: { verified: boolean; action: string } };
+    expect(opened.task.status).toBe('open');
+    expect(opened.task.completedAt).toBeUndefined();
+    expect(opened.receipt).toMatchObject({ verified: true, action: 'reopen_task' });
+    const removedTask = await call('DELETE', `/api/tasks/${savedTask.task.id}`, { host: 'localhost:3000' });
+    expect(removedTask.status).toBe(200);
+    expect(JSON.parse(removedTask.body).receipt.verified).toBe(true);
+    const missing = await call('DELETE', `/api/tasks/${savedTask.task.id}`, { host: 'localhost:3000' });
+    expect(missing.status).toBe(404);
+    const missingReopen = await call('POST', `/api/tasks/${savedTask.task.id}/reopen`, { host: 'localhost:3000' });
+    expect(missingReopen.status).toBe(404);
+
     const forgotten = await call('POST', '/api/memory', { host: 'localhost:3000', 'content-type': 'application/json' }, {
       text: 'The spare key is in the drawer',
       tags: [],
@@ -198,6 +212,10 @@ describe('household routes', () => {
     expect(deleted.status).toBe(403);
     const complete = await call('POST', '/api/tasks/abc/complete', { host: 'localhost:3000' }, undefined, remote);
     expect(complete.status).toBe(403);
+    const reopen = await call('POST', '/api/tasks/abc/reopen', { host: 'localhost:3000' }, undefined, remote);
+    expect(reopen.status).toBe(403);
+    const removed = await call('DELETE', '/api/tasks/abc', { host: 'localhost:3000' }, undefined, remote);
+    expect(removed.status).toBe(403);
     const approval = await call('POST', '/api/approvals/abc', headers, { decision: 'approve' }, remote);
     expect(approval.status).toBe(403);
   });
@@ -225,6 +243,14 @@ describe('household routes', () => {
     const taskId = JSON.parse(task.body).task.id as string;
     const complete = await call('POST', `/api/tasks/${taskId}/complete`, authed, undefined, '203.0.113.10');
     expect(complete.status).toBe(200);
+    const lockedReopen = await call('POST', `/api/tasks/${taskId}/reopen`, headers, undefined, '203.0.113.10');
+    expect(lockedReopen.status).toBe(401);
+    const reopened = await call('POST', `/api/tasks/${taskId}/reopen`, authed, undefined, '203.0.113.10');
+    expect(reopened.status).toBe(200);
+    const lockedRemove = await call('DELETE', `/api/tasks/${taskId}`, headers, undefined, '203.0.113.10');
+    expect(lockedRemove.status).toBe(401);
+    const removedTask = await call('DELETE', `/api/tasks/${taskId}`, authed, undefined, '203.0.113.10');
+    expect(removedTask.status).toBe(200);
     const { forget } = await import('./household/actions');
     const pending = await forget(id);
     expect(pending.ok).toBe(true);

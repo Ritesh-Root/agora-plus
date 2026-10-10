@@ -33,7 +33,7 @@ The runs recorded for this entry are the voice simulator and Claude Code with th
 
 ## Voice simulator
 
-`/alexa` is a separate page so the 3D office does not load there. The route is lazy-loaded from [src/main.tsx](../src/main.tsx). The screen is [src/alexa/AlexaSimulator.tsx](../src/alexa/AlexaSimulator.tsx). The label on the page is an unofficial simulated Alexa+ experience.
+`/` and `/alexa` are the household Home. The 3D office is `/office`, so the Home chunk does not load it. The route is chosen in [src/main.tsx](../src/main.tsx). The screen is [src/home/HomePage.tsx](../src/home/HomePage.tsx). The label on the assistant is an unofficial simulated Alexa+ experience.
 
 A turn is `POST /api/alexa-sim/turn` in [server/alexaSim/bridge.ts](../server/alexaSim/bridge.ts). The first event is a fixed acknowledgement from [server/alexaSim/ack.ts](../server/alexaSim/ack.ts). That phrase does not call a model. The bridge then opens a real MCP client to this server's `/mcp` and calls tools over HTTP. It does not import the action functions. The SSE `final` event includes `runId` when that turn started a run. The latency meter records milliseconds only when audio starts, and says "text only" when it does not.
 

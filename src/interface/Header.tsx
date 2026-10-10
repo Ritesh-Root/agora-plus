@@ -1,4 +1,4 @@
-import { Info, KeyRound, Maximize2, Settings, Users, Scale, Play, BarChart2, X, Brain, House, Mic } from 'lucide-react';
+import { Info, KeyRound, Maximize2, Settings, Users, Scale, Play, BarChart2, X, Brain, House } from 'lucide-react';
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import packageJson from '../../package.json';
@@ -11,14 +11,13 @@ import { getAllAgents } from '../data/agents';
 import { MAX_PLAYERS } from '../../shared/protocol';
 import { networkClient, startSwarm } from '../network/NetworkClient';
 import ConnectionsModal from './ConnectionsModal';
-import HouseholdPanel from './HouseholdPanel';
 import InfoModal from './InfoModal';
 import { NegotiationArena } from './NegotiationArena';
 
 const version = packageJson.version;
 
 const Header: React.FC = () => {
-  const { llmConfig, isBYOKOpen, setBYOKOpen, isNegotiationOpen, setNegotiationOpen, isHouseholdOpen, setHouseholdOpen } = useUiStore();
+  const { llmConfig, isBYOKOpen, setBYOKOpen, isNegotiationOpen, setNegotiationOpen } = useUiStore();
   const { setViewMode } = useCoreStore();
   const roster = useRosterStore((s) => s.roster);
   const self = useRosterStore((s) => s.self);
@@ -251,28 +250,15 @@ const Header: React.FC = () => {
         <div className="w-px h-4 bg-zinc-200" />
 
         <div className="flex items-center gap-2">
-          <button
+          <a
             data-testid="household-btn"
-            onClick={() => setHouseholdOpen(true)}
+            href="/"
             className="inline-flex min-h-6 items-center gap-1 rounded-md p-1 text-zinc-600 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-            title="Household"
-            type="button"
-            aria-label="Household"
+            title="Home"
+            aria-label="Home"
           >
             <House size={16} aria-hidden="true" />
-            <span className="hidden text-[10px] font-black uppercase tracking-wider lg:inline">Household</span>
-          </button>
-          <a
-            data-testid="voice-sim-btn"
-            href="/alexa"
-            target="_blank"
-            rel="noopener"
-            className="inline-flex min-h-6 items-center gap-1 rounded-md p-1 text-zinc-600 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-            title="Voice simulator, opens a new tab"
-            aria-label="Voice, opens a new tab"
-          >
-            <Mic size={16} aria-hidden="true" />
-            <span className="hidden text-[10px] font-black uppercase tracking-wider lg:inline">Voice</span>
+            <span className="hidden text-[10px] font-black uppercase tracking-wider lg:inline">Home</span>
           </a>
           <button
             data-testid="fullscreen-btn"
@@ -310,10 +296,6 @@ const Header: React.FC = () => {
 
       {isBYOKOpen && (
         <ConnectionsModal key="model-connections-modal" onClose={() => setBYOKOpen(false)} />
-      )}
-
-      {isHouseholdOpen && (
-        <HouseholdPanel key="household-panel" onClose={() => setHouseholdOpen(false)} />
       )}
 
       {isNegotiationOpen && (

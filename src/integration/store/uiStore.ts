@@ -60,9 +60,6 @@ export const useUiStore = create<CharacterState>()(
     isNegotiationOpen: false,
     setNegotiationOpen: (open: boolean) => set({ isNegotiationOpen: open }),
 
-    isHouseholdOpen: false,
-    setHouseholdOpen: (open: boolean) => set({ isHouseholdOpen: open }),
-
     activeAuditTaskId: null,
     setActiveAuditTaskId: (taskId: string | null) => set({ activeAuditTaskId: taskId }),
 

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerMessage } from '../shared/protocol';
 import { getHub } from './hub';
 import { setDataDir, writeJson } from './household/store';
-import { getRunRecord, listRecentRuns, startSocietyRun } from './runEngine';
+import { getRunRecord, keeperLine, listRecentRuns, startSocietyRun, whenRunSettled } from './runEngine';
 import type { ServerProvider } from './society/provider';
 
 let dir = '';
@@ -129,6 +129,32 @@ describe('runEngine', () => {
     expect(markdown).toBe(saved?.synthesis);
     const recent = await listRecentRuns(5);
     expect(recent[0]?.id).toBe(first.runId);
+  });
+
+  it('speaks the conflict sentence of a Keeper note without its headings', () => {
+    const note = '## Review\nThe menu looks fine. Conflicts Identified: Timing Conflict with Swimming: Mia has swimming on Saturdays, which conflicts with the picnic from 1 PM to 5 PM.';
+    expect(keeperLine(note)).toBe('Mia has swimming on Saturdays, which conflicts with the picnic from 1 PM to 5 PM.');
+  });
+
+  it('keeps the reason on the record when every worker call fails', async () => {
+    listen();
+    const down: ServerProvider = {
+      ...provider(Promise.resolve()),
+      async generateCompletion(_messages, _tools, systemInstruction) {
+        const system = systemInstruction ?? '';
+        if (system.includes('You are the Manager') || system.includes('You lead this team')) {
+          return { content: JSON.stringify([{ id: 't1', title: 'Flag allergies', role: 'Keeper', prompt: 'Check household memory' }]) };
+        }
+        throw new Error('The operation was aborted due to timeout');
+      },
+    };
+    const started = await startSocietyRun({ brief: 'Plan dinner', provider: down, team: [], source: 'household' });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    await whenRunSettled(started.runId);
+    const saved = await getRunRecord(started.runId);
+    expect(saved?.status).toBe('stopped');
+    expect(saved?.error).toBeTruthy();
   });
 
   it('lists runs newest first by when they started', async () => {

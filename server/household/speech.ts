@@ -34,8 +34,17 @@ export function toSpeech(text: string, options: SpeechOptions = {}): string {
   const maxChars = options.maxChars ?? 220;
   const plain = stripMarkdown(text);
   if (!plain || maxSentences <= 0 || maxChars <= 0) return '';
-  const kept = sentencesOf(plain).slice(0, maxSentences).join(' ').trim();
+  const sentences = sentencesOf(plain).slice(0, maxSentences);
+  const kept = sentences.join(' ').trim();
   if (kept.length <= maxChars) return kept;
+  // Drop whole sentences before cutting one, so a summary does not stop mid-thought.
+  let whole = '';
+  for (const sentence of sentences) {
+    const next = whole ? `${whole} ${sentence}` : sentence;
+    if (next.length > maxChars) break;
+    whole = next;
+  }
+  if (whole) return whole;
   const slice = kept.slice(0, maxChars);
   const boundary = slice.lastIndexOf(' ');
   return (boundary > 0 ? slice.slice(0, boundary) : slice).trim();

@@ -38,9 +38,6 @@ export interface CharacterState {
   isNegotiationOpen: boolean;
   setNegotiationOpen: (open: boolean) => void;
 
-  isHouseholdOpen: boolean;
-  setHouseholdOpen: (open: boolean) => void;
-
   activeAuditTaskId: string | null;
   setActiveAuditTaskId: (taskId: string | null) => void;
 

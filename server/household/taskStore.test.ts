@@ -3,7 +3,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDataDir } from './store';
-import { addTask, completeTask, listTasks } from './taskStore';
+import { addTask, completeTask, listTasks, removeTask, reopenTask } from './taskStore';
 
 let dir = '';
 
@@ -53,6 +53,24 @@ describe('taskStore', () => {
     expect(loaded.map((task) => task.title)).toEqual(['Old bins']);
     expect(loaded[0]?.list).toBeUndefined();
     expect(loaded[0]?.dueAt).toBeUndefined();
+  });
+
+  it('reopens a done task and removes a task by id', async () => {
+    const milk = await addTask('Buy milk', undefined, 'ui');
+    const done = await completeTask(milk.id);
+    expect(done?.status).toBe('done');
+    expect(done?.completedAt).toBeTruthy();
+    const opened = await reopenTask(milk.id);
+    expect(opened?.status).toBe('open');
+    expect(opened?.completedAt).toBeUndefined();
+    expect((await listTasks('open')).map((task) => task.id)).toContain(milk.id);
+    const again = await reopenTask(milk.id);
+    expect(again?.status).toBe('open');
+    expect(await reopenTask('missing')).toBeNull();
+    const removed = await removeTask(milk.id);
+    expect(removed?.id).toBe(milk.id);
+    expect(await listTasks()).toEqual([]);
+    expect(await removeTask(milk.id)).toBeNull();
   });
 
   it('moves a corrupt task file aside so the next add does not erase it', async () => {

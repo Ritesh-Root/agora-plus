@@ -54,6 +54,8 @@ export interface TaskResult {
   attempts: number;
   /** True if a retry turned an invalid output into a valid one. */
   healed: boolean;
+  /** The model call threw (a timeout, an outage). The task is escalated and the run goes on. */
+  failure?: unknown;
 }
 
 export interface SocietyResult {
@@ -321,12 +323,20 @@ async function runWorker(
       const userContent = workerPrompt(task, brief, siblings, depText, attempts, lastInvalid, sources);
 
       prepareRequest(provider, { stage: 'worker', agent: task.role, attempt: attempts });
-      const res = await provider.generateCompletion(
-        [{ role: 'user', content: userContent }],
-        undefined,
-        system,
-        model,
-      );
+      let res: Awaited<ReturnType<LLMLike['generateCompletion']>>;
+      try {
+        res = await provider.generateCompletion(
+          [{ role: 'user', content: userContent }],
+          undefined,
+          system,
+          model,
+        );
+      } catch (failure) {
+        // One slow or failed call should not end the whole run. The provider already retried,
+        // so this task is handed back as escalated and its siblings keep going.
+        onEvent?.({ type: 'task-done', taskId: task.id, title: task.title, status: 'escalated', output, attempts, healed: false });
+        return { id: task.id, title: task.title, role: task.role, status: 'escalated', output, attempts, healed: false, failure };
+      }
       output = res.content ?? '';
       if (usage) noteCall(usage, res);
 
@@ -458,6 +468,8 @@ export async function runSociety(
     }
   }
   const workersMs = Date.now() - workersStarted;
+  // Every worker call failed: the model is down or misconfigured, so report that instead of an empty plan.
+  if (results.length > 0 && results.every((result) => result.failure !== undefined)) throw results[0]?.failure;
 
   const beforeStarted = Date.now();
   const leadNotes = stopped() ? '' : ((await options.beforeSynthesis?.(results)) || '');

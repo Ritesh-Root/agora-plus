@@ -71,15 +71,18 @@ if (includeWebkit()) {
   console.warn('playwright: skipping webkit; host libraries for MiniBrowser are missing');
 }
 
+/** E2E_PORT moves the test server when 3000 is taken. */
+const port = Number.parseInt(process.env.E2E_PORT ?? '', 10) || 3000;
+
 export default defineConfig({
   testDir: 'e2e',
   timeout: 90_000,
   expect: { timeout: 20_000 },
   workers: 1,
-  use: { baseURL: 'http://127.0.0.1:3000' },
+  use: { baseURL: `http://127.0.0.1:${port}` },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 3000',
-    url: 'http://127.0.0.1:3000',
+    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
+    url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
     timeout: 120_000,
     env: e2eEnv(),

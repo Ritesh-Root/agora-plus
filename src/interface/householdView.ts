@@ -21,12 +21,23 @@ export interface ApprovalItem {
   kind: string;
 }
 
+export interface RunTask {
+  id: string;
+  title: string;
+  role: string;
+  status: string;
+}
+
 export interface RunItem {
   id: string;
   brief: string;
   status: string;
   startedAt?: string;
   spokenSummary?: string;
+  finishedAt?: string;
+  error?: string;
+  source?: string;
+  tasks?: RunTask[];
 }
 
 export interface Snapshot {
@@ -34,6 +45,8 @@ export interface Snapshot {
   tasks: TaskItem[];
   pendingApprovals: ApprovalItem[];
   recentRuns: RunItem[];
+  /** The briefing lines, safety facts and reminders first. */
+  briefing: string[];
   suggestions: string[];
 }
 
@@ -42,8 +55,25 @@ export const emptySnapshot: Snapshot = {
   tasks: [],
   pendingApprovals: [],
   recentRuns: [],
+  briefing: [],
   suggestions: [],
 };
+
+function parseRunTasks(value: unknown): RunTask[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tasks: RunTask[] = [];
+  for (const item of value) {
+    const row = asRecord(item);
+    if (!row) continue;
+    tasks.push({
+      id: typeof row.id === 'string' ? row.id : '',
+      title: typeof row.title === 'string' ? row.title : '',
+      role: typeof row.role === 'string' ? row.role : '',
+      status: typeof row.status === 'string' ? row.status : '',
+    });
+  }
+  return tasks;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -166,13 +196,24 @@ export function parseSnapshot(value: unknown): Snapshot | null {
       };
       const startedAt = optionalText(row.startedAt);
       const spokenSummary = optionalText(row.spokenSummary);
+      const finishedAt = optionalText(row.finishedAt);
+      const error = optionalText(row.error);
+      const source = optionalText(row.source);
       if (startedAt) run.startedAt = startedAt;
       if (spokenSummary) run.spokenSummary = spokenSummary;
+      if (finishedAt) run.finishedAt = finishedAt;
+      if (error) run.error = error;
+      if (source) run.source = source;
+      const tasks = parseRunTasks(row.tasks);
+      if (tasks) run.tasks = tasks;
       recentRuns.push(run);
     }
   }
+  const briefing = Array.isArray(body.briefing)
+    ? body.briefing.filter((item): item is string => typeof item === 'string')
+    : [];
   const suggestions = Array.isArray(body.suggestions)
     ? body.suggestions.filter((item): item is string => typeof item === 'string')
     : [];
-  return { memory, tasks, pendingApprovals, recentRuns, suggestions };
+  return { memory, tasks, pendingApprovals, recentRuns, briefing, suggestions };
 }
