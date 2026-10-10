@@ -1,0 +1,27 @@
+name: CI
+
+# AGORA+ needs its own server (/api, /mcp, the relay), so there is no static Pages deploy.
+# Every push and pull request type-checks the client and server, runs the unit tests, and builds.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run lint:server
+      - run: npm test
+      - run: npm run build
