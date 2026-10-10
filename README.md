@@ -309,7 +309,7 @@ Verified from this repository:
 
 The static prototype is [https://agora-gamma-seven.vercel.app](https://agora-gamma-seven.vercel.app). Joining there opens a local preview in the browser. It does not start the shared room, and it does not call a model.
 
-A container image and a Cloud Run service were not verified from this workspace. The hackathon runbook is [docs/DEPLOY.md](docs/DEPLOY.md). Those tunnel, ECS, and Cloud Run commands were not run here. [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds a static `dist/` artifact for GitHub Pages. That workflow does not start the room process, so a Pages site would not be the shared room.
+A container image and a Cloud Run service were not verified from this workspace. The hackathon runbook is [docs/DEPLOY.md](docs/DEPLOY.md). Those tunnel, ECS, and Cloud Run commands were not run here. There is no static Pages deploy, because a static copy has no `/api`, `/mcp`, or room. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) type-checks the client and server, runs the unit tests, and builds on every push and pull request.
 
 When every browser disconnects, the sockets close. With a platform that stops an idle process, the in-memory room is gone. A model call still in flight is not a background job. This repository does not promise that a document finishes after everyone leaves, or that it survives a restart.
 

@@ -82,7 +82,8 @@ afterEach(async () => {
     server = null;
     await new Promise<void>((resolve) => closing.close(() => resolve()));
   }
-  await rm(dir, { recursive: true, force: true });
+  // A refresh-token write can land just after the test ends; retry instead of failing on ENOTEMPTY.
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   resetOauthState();
   for (const [key, value] of savedEnv) {
     if (value === undefined) delete process.env[key];
