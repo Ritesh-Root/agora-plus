@@ -36,15 +36,19 @@ async function box(name, locator) {
 }
 
 // The Home, with the MCP forget request waiting for a person.
+// Approvals expire after ten minutes, so a later run keeps the earlier capture.
 await page.goto(BASE, { waitUntil: 'networkidle' });
 const waiting = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Waiting for you', exact: true }) });
-await waiting.first().waitFor({ timeout: 15_000 });
-await sleep(800);
-await waiting.first().scrollIntoViewIfNeeded();
-await page.evaluate(() => window.scrollTo(0, 0));
-await sleep(400);
-await shot('mcp-waiting');
-await box('waiting', waiting);
+try {
+  await waiting.first().waitFor({ timeout: 8_000 });
+  await sleep(800);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await sleep(400);
+  await shot('mcp-waiting');
+  await box('waiting', waiting);
+} catch {
+  console.log('nothing is waiting for approval; keeping the earlier mcp-waiting capture');
+}
 
 // The public repository, scrolled to the README's first screen.
 await page.goto(REPO, { waitUntil: 'networkidle' });

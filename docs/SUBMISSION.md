@@ -16,7 +16,7 @@ A household file on a server you run. Every write comes back with a receipt read
 
 `<VIDEO_URL>`
 
-No public video URL is recorded in this repository. The take is [docs/DEMO_SCRIPT.md](DEMO_SCRIPT.md): Chrome, open on `/alexa`, stop before 2:55.
+No public video URL is recorded in this repository yet. The video is the 2:47 judge cut in [video/judge](../video/judge/README.md), built from captures of the running app, a real Claude Code session over MCP, and real `curl` requests. It is rendered to `agora-plus-judge.mp4`. A live take to record instead is [docs/DEMO_SCRIPT.md](DEMO_SCRIPT.md).
 
 ## Description
 
