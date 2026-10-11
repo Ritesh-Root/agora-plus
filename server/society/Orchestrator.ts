@@ -9,7 +9,6 @@
  * Depends only on the LLMLike shape. Free of DOM and React so it runs in the room server.
  */
 
-import { judgeWorkerOutput } from './decider/gates';
 import {
   constraintsFromBrief,
   countDocumentWords,
@@ -17,8 +16,6 @@ import {
   MAX_DOCUMENT_REPAIRS,
   revisionLabel,
 } from './documentCheck';
-import { takeBossEdit } from './decider/live';
-import { beginResearch, researchForTask, sourcesMarkdown } from '../research/research';
 
 /** Minimal structural type any LLM provider satisfies. */
 export interface LLMLike {
@@ -91,11 +88,6 @@ export interface OrchestratorOptions {
   models?: { manager?: string; worker?: string };
   /** Returns false to mark a worker output invalid (triggers self-heal). */
   isValidOutput?: (task: SocietyTask, output: string) => boolean;
-  /** Jev path. `legacy` means use isValidOutput. */
-  judgeOutput?: (
-    task: SocietyTask,
-    output: string,
-  ) => Promise<'accept' | 'retry' | 'escalate' | 'legacy'>;
   onEvent?: (event: { type: string; [key: string]: any }) => void;
   /** Called with worker results before the Lead writes the deliverable. */
   beforeSynthesis?: (results: TaskResult[]) => Promise<string | void>;
@@ -270,7 +262,6 @@ function workerPrompt(
   depText: string,
   attempt: number,
   lastInvalid: string,
-  sources: string,
 ): string {
   const parts = [
     `Brief:\n${brief}`,
@@ -280,7 +271,6 @@ function workerPrompt(
       : '',
     siblings.length ? `Other tasks in this wave, do not duplicate them: ${siblings.join('; ')}` : '',
     depText ? `Outputs you depend on:\n${depText}` : '',
-    sources ? `${sources}\n\nCite the sources you use, by URL.` : '',
   ].filter(Boolean);
   const body = parts.join('\n\n');
   if (attempt === 1) return body;
@@ -295,7 +285,6 @@ async function runWorker(
   provider: LLMLike,
   model: string,
   isValid: (task: SocietyTask, output: string) => boolean,
-  judgeOutput: OrchestratorOptions['judgeOutput'] | undefined,
   tracker: ReturnType<typeof makeConcurrencyTracker>,
   onEvent?: (event: { type: string; [key: string]: any }) => void,
   team?: OrchestratorOptions['team'],
@@ -317,10 +306,7 @@ async function runWorker(
       const system = member
         ? `You are ${member.name}. ${member.description} Complete the task and respond with the deliverable only.`
         : `You are a ${task.role} worker in an agent society. Complete the task and respond with the deliverable only.`;
-      const sources = await researchForTask(task, brief, {
-        onStart: () => onEvent?.({ type: 'task-research', taskId: task.id, title: task.title, role: task.role }),
-      });
-      const userContent = workerPrompt(task, brief, siblings, depText, attempts, lastInvalid, sources);
+      const userContent = workerPrompt(task, brief, siblings, depText, attempts, lastInvalid);
 
       prepareRequest(provider, { stage: 'worker', agent: task.role, attempt: attempts });
       let res: Awaited<ReturnType<LLMLike['generateCompletion']>>;
@@ -340,16 +326,7 @@ async function runWorker(
       output = res.content ?? '';
       if (usage) noteCall(usage, res);
 
-      const judged = judgeOutput
-        ? await judgeOutput(task, output)
-        : await judgeWorkerOutput({ brief, task, output });
-      const verdict = judged === 'legacy'
-        ? (isValid(task, output) ? 'accept' : 'retry')
-        : judged;
-
-      if (verdict === 'accept') {
-        const edited = takeBossEdit();
-        if (edited) output = edited;
+      if (isValid(task, output)) {
         onEvent?.({ type: 'task-done', taskId: task.id, title: task.title, status: 'done', output, attempts, healed: attempts > 1 });
         return {
           id: task.id,
@@ -361,7 +338,6 @@ async function runWorker(
           healed: attempts > 1,
         };
       }
-      if (verdict === 'escalate') break;
       lastInvalid = output;
     }
 
@@ -432,7 +408,6 @@ export async function runSociety(
   const usage = { calls: 0, promptTokens: 0, completionTokens: 0 };
   const isValid = options.isValidOutput ?? defaultIsValid;
   const onEvent = options.onEvent;
-  beginResearch();
 
   let tasks: SocietyTask[];
   if (options.presetTasks) {
@@ -460,7 +435,7 @@ export async function runSociety(
         .filter((text): text is string => !!text)
         .map((text) => clip(text))
         .join('\n\n');
-      return runWorker(task, brief, siblings, depText, provider, modelFor(team, task.role, workerModel), isValid, options.judgeOutput, tracker, onEvent, team, usage);
+      return runWorker(task, brief, siblings, depText, provider, modelFor(team, task.role, workerModel), isValid, tracker, onEvent, team, usage);
     }));
     for (const result of waveResults) {
       outputs.set(result.id, result.output);
@@ -500,8 +475,6 @@ export async function runSociety(
     );
     synthesis = (leadRes.content ?? '').trim();
     noteCall(usage, leadRes);
-    const cited = sourcesMarkdown();
-    if (cited && synthesis && !synthesis.includes('## Sources')) synthesis += cited;
   }
 
   const constraints = constraintsFromBrief(brief);

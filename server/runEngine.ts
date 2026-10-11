@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import { readdir } from 'fs/promises';
 import path from 'path';
 import { WebSocket, type WebSocket as WsSocket } from 'ws';
@@ -7,10 +6,7 @@ import { toSpeech } from './household/speech';
 import { getDataDir, readJson, writeJson, writeText } from './household/store';
 import { getHub } from './hub';
 import { publicModelError } from './modelError';
-import { researchSearchCount, researchSources } from './research/research';
 import { RoomState } from './roomState';
-import { setBossAsker, setDecisionSink, toDecisionWire } from './society/decider/live';
-import { beginRunStats, currentRunStats, endRunStats } from './society/decider/runStats';
 import { leadNotesFromConflict } from './society/leadNotes';
 import { runSociety, type SocietyTask } from './society/Orchestrator';
 import type { ServerProvider } from './society/provider';
@@ -84,17 +80,7 @@ export function forwardSocietyEvent(
   });
   const runId = tracked?.runId;
   const room = tracked?.room;
-  if (event.type === 'task-research') {
-    if (runId && room) room.noteTask(runId, { id: event.taskId, title: event.title, role: event.role, status: 'running' });
-    deliver({
-      type: 'society-task-update',
-      taskId: event.taskId,
-      title: event.title,
-      role: event.role,
-      status: 'running',
-      researching: true,
-    });
-  } else if (event.type === 'task-start') {
+  if (event.type === 'task-start') {
     if (runId && room) room.noteTask(runId, { id: event.taskId, title: event.title, role: event.role, status: 'running' });
     deliver({
       type: 'society-task-update',
@@ -147,14 +133,6 @@ function emit(requester: WsSocket | undefined, msg: ServerMessage): void {
   const sock = requester ?? getHub().hostSocket();
   if (!sock || sock.readyState !== WebSocket.OPEN) return;
   sock.send(JSON.stringify(msg));
-}
-
-function clearBoss(): void {
-  setDecisionSink(null);
-  setBossAsker(null);
-  const waiting = getHub().pendingBoss;
-  for (const wait of waiting.values()) wait(null);
-  waiting.clear();
 }
 
 function keeperFlag(tasks: { role: string; output?: string }[]): string {
@@ -454,27 +432,6 @@ export async function startSocietyRun(input: {
   };
 
   emit(requester, { type: 'society-started', brief: input.brief, taskCount: 0 });
-  beginRunStats();
-  setDecisionSink((record) => {
-    emit(requester, { type: 'society-decision', decision: toDecisionWire(record) });
-  });
-  setBossAsker((record) => new Promise((resolve) => {
-    const sock = requester ?? getHub().hostSocket();
-    if (!sock || sock.readyState !== WebSocket.OPEN) {
-      resolve(null);
-      return;
-    }
-    const id = randomUUID();
-    const timer = setTimeout(() => {
-      getHub().pendingBoss.delete(id);
-      resolve(null);
-    }, 30_000);
-    getHub().pendingBoss.set(id, (reply) => {
-      clearTimeout(timer);
-      resolve(reply);
-    });
-    emit(requester, { type: 'decision-request', id, decision: toDecisionWire(record) });
-  }));
 
   const model = input.model?.trim();
   const team = input.team ?? [];
@@ -536,8 +493,6 @@ export async function startSocietyRun(input: {
     if (result.documentStatus === 'stopped') {
       room.markStopped(runId);
       deliver({ type: 'society-run-status', runId, status: 'stopped' });
-      endRunStats();
-      clearBoss();
       const spokenSummary = await householdSpokenSummary(input.source, provider, result.synthesis, result.tasks);
       if (spokenSummary) room.noteSpokenSummary(runId, spokenSummary);
       const saveError = await saveFinished(runId, 'stopped', {
@@ -566,11 +521,7 @@ export async function startSocietyRun(input: {
       wordCount: result.wordCount,
       revisionLabel: result.revisionLabel,
     });
-    if (!recorded) {
-      endRunStats();
-      clearBoss();
-      return;
-    }
+    if (!recorded) return;
     const counted = provider.takeUsage();
     deliver({
       type: 'society-complete',
@@ -598,27 +549,10 @@ export async function startSocietyRun(input: {
           totalCompletionTokens: counted.completionTokens,
           missingUsage: counted.missingUsage,
         },
-        research: {
-          searches: currentRunStats()?.researchCalls ?? researchSearchCount(),
-          sources: researchSources(),
-        },
-        summary: {
-          decisions: currentRunStats()?.decisionCalls ?? 0,
-          inputTokens: currentRunStats()?.inputTokens ?? 0,
-          jevCostUsd: ((currentRunStats()?.inputTokens ?? 0) * 0.042) / 1_000_000,
-          searches: researchSearchCount(),
-          sources: researchSources(),
-          comparisonMeasured: false,
-          comparisonNote: 'The five-brief comparison was not run. Jev returned HTTP 401, so time saved versus the legacy path was not measured.',
-        },
       },
     });
-    endRunStats();
-    clearBoss();
   }).catch(async (err) => {
     closing.add(runId);
-    endRunStats();
-    clearBoss();
     if (room.ownsRun(runId)) {
       room.markStopped(runId);
       deliver({ type: 'society-run-status', runId, status: 'stopped' });

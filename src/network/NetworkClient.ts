@@ -3,7 +3,6 @@ import { useRosterStore } from './RosterStore';
 import { useSocietyStore } from '../integration/store/societyStore';
 import { useCoreStore } from '../integration/store/coreStore';
 import { useRoomChatStore } from './roomChatStore';
-import { useDecisionStore } from '../interface/decisionStore';
 import { useUiStore } from '../integration/store/uiStore';
 import { wireAgent } from '../core/llm/connections';
 import { agentIndexForRole, getAllAgents } from '../data/agents';
@@ -240,16 +239,9 @@ export class NetworkClient {
         break;
       case 'society-started':
         this.swarmSeen.clear();
-        useDecisionStore.getState().reset();
         useCoreStore.getState().startProject(msg.brief);
         useSocietyStore.getState().startSociety(msg.brief);
         this.noteSwarm('Started planning');
-        break;
-      case 'society-decision':
-        useDecisionStore.getState().add(msg.decision);
-        break;
-      case 'decision-request':
-        useDecisionStore.getState().setPending({ id: msg.id, ...msg.decision });
         break;
       case 'society-task-update':
         useSocietyStore.getState().updateTask(msg.taskId, {
@@ -258,7 +250,6 @@ export class NetworkClient {
           status: msg.status,
           output: msg.output,
           attempt: msg.attempt,
-          researching: msg.researching ?? false,
         });
         if (msg.status === 'running') this.noteSwarm(`Started ${msg.title}`, msg.role, `${msg.taskId}:start`);
         else if (msg.status === 'healing') this.noteSwarm(`Retrying ${msg.title}`, msg.role, `${msg.taskId}:heal:${msg.attempt ?? 0}`);

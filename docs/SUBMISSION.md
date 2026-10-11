@@ -2,7 +2,7 @@
 
 Copy the text under each heading. Placeholders are in angle brackets. The hackathon entry is the public MIT repo https://github.com/Ritesh-Root/agora-plus. It carries the full history, including the original AGORA work (https://github.com/Ritesh-Root/agora); the tag `pre-window` marks where the submission window starts.
 
-Measured latencies below are the local fast path with no AWS credentials. Model-path and Polly numbers are `TODO(measure)`. Sources for the customer lines are [docs/research/alexa-plus-voice-of-customer.md](research/alexa-plus-voice-of-customer.md) and [docs/research/sources.json](research/sources.json).
+Measured latencies below are the local fast path with no AWS credentials. Model-path and Polly latencies were not measured. Sources for the customer lines are [docs/research/alexa-plus-voice-of-customer.md](research/alexa-plus-voice-of-customer.md) and [docs/research/sources.json](research/sources.json).
 
 ## Project name
 
@@ -26,7 +26,7 @@ The surfaces that were run are the unofficial `/alexa` simulator and the MCP ser
 
 Eleven tools are always registered. `web_research` is a twelfth when a search key is set. A fact can name a person. A task can name an owner, a list such as shopping, and a reminder time. The briefing speaks a saved allergy when one is stored. Recall says both facts when they tie. An order, a booking, a payment, or a phone call is refused.
 
-Behind a plan, four agents can work on Amazon Bedrock through the Claude Messages endpoint: Agora, Scout, Planner, and Keeper. That path runs only when `AGORA_SERVER_LLM=bedrock` and AWS credentials are present. A live Bedrock call was not recorded. Keeper's job is to check the plan against household memory. Amazon Polly speaks only with AWS credentials. A successful Polly synthesize was not recorded. The browser voice speaks when Polly is unavailable. Time to first audio is `TODO(measure)`. The 3D office defaults to that same Household cast while a run is going. The bundled office models are CC BY-NC and are not needed for `/alexa`.
+Behind a plan, four agents can work on Amazon Bedrock through the Claude Messages endpoint: Agora, Scout, Planner, and Keeper. That path runs only when `AGORA_SERVER_LLM=bedrock` and AWS credentials are present. A live Bedrock call was not recorded. Keeper's job is to check the plan against household memory. Amazon Polly speaks only with AWS credentials. A successful Polly synthesize was not recorded. The browser voice speaks when Polly is unavailable. Time to first audio was not measured. The 3D office defaults to that same Household cast while a run is going. The bundled office models are CC BY-NC and are not needed for `/alexa`.
 
 The voice page is an unofficial simulated Alexa+ experience, for the demo and for anyone who does not have an Echo. It is labeled that way in the app.
 
@@ -74,11 +74,11 @@ AGORA already existed. The tag `pre-window` is commit `4f61371` on 2026-08-20.
 288 files changed, 29768 insertions(+), 2318 deletions(-)
 ```
 
-That range is 40 commits, dated 2026-09-23 through 2026-10-08. September continued the office: WebGL2, a swarm that finishes a document, Jev's approve/skip/debate, and replay. From 8 Oct the branch adds the household brain: files on disk, receipts, approvals, the MCP server and OAuth, Claude on Bedrock, the voice simulator and its fast path, the Household panel, the Agent Skill, the Alexa+ add-on package, deploy notes, the MCP Apps household card, and the same-day fix wave (people on facts, the shopping list, reminders, the voice approval gate, the household lock, persisted refresh tokens, and the Household office cast).
+That range is 40 commits, dated 2026-09-23 through 2026-10-08. September continued the office: WebGL2, a swarm that finishes a document, and replay. From 8 Oct the branch adds the household brain: files on disk, receipts, approvals, the MCP server and OAuth, Claude on Bedrock, the voice simulator and its fast path, the Household panel, the Agent Skill, the Alexa+ add-on package, deploy notes, the MCP Apps household card, and the same-day fix wave (people on facts, the shopping list, reminders, the voice approval gate, the household lock, persisted refresh tokens, and the Household office cast).
 
 The phase-by-phase log is [docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md).
 
-Time to first audio on the fast path is `TODO(measure)`. Model-path and Polly numbers are `TODO(measure)`. Older local timings were acknowledgement and screen times, not first audio. Phase 6 logged 55–58 ms to the acknowledgement, about 100 ms for a full remember turn, and about 800 ms from "plan dinners" to the approval card when a preview existed.
+Time to first audio was not measured: the browsers on the build machine had no speech voices, so the fast path only ever showed "text only", and Polly and the model path need AWS credentials. Older local timings were acknowledgement and screen times, not first audio. Phase 6 logged 55–58 ms to the acknowledgement, about 100 ms for a full remember turn, and about 800 ms from "plan dinners" to the approval card when a preview existed.
 
 ## AWS Builder field
 
@@ -86,7 +86,7 @@ AGORA+ can call Amazon Bedrock and Amazon Polly, and it is written to run as one
 
 Bedrock is the Claude Messages endpoint via `AnthropicBedrockMantle` (`@anthropic-ai/bedrock-sdk`), not the Converse API. Default models are `anthropic.claude-sonnet-5` and `anthropic.claude-haiku-4-5`. The provider is [server/llm/bedrockProvider.ts](../server/llm/bedrockProvider.ts). Polly neural speech is [server/alexaSim/tts.ts](../server/alexaSim/tts.ts) (`POST /api/tts`, voice Joanna). The task role allows `bedrock-mantle:CreateInference` and `polly:SynthesizeSpeech`. Deploy steps, including ECS Express Mode and a one-task Fargate fallback, are in [docs/DEPLOY.md](DEPLOY.md). Call counts per voice turn and per swarm run, with no invented prices, are in [docs/AWS.md](AWS.md).
 
-A live Bedrock call and a successful Polly synthesize were not recorded. The build shell had no AWS credentials. Those latencies are `TODO(measure)`.
+A live Bedrock call and a successful Polly synthesize were not recorded. The build shell had no AWS credentials, so those latencies were not measured.
 
 ## Open Source field
 

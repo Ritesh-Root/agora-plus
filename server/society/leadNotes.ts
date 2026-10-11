@@ -1,14 +1,13 @@
-import { judgeConflict } from './decider/gates';
 import { NegotiationResult, runNegotiation } from './Negotiation';
 import { LLMLike, TaskResult } from './Orchestrator';
 
 export interface LeadNotes {
   notes?: string;
-  conflict: 'skip' | 'ask_boss' | 'debate' | 'legacy' | 'none';
+  conflict: 'debate' | 'none';
   negotiation?: NegotiationResult;
 }
 
-/** Decide whether two worker outputs need a debate before the Lead writes. */
+/** Two usable worker outputs are debated before the Lead writes. */
 export async function leadNotesFromConflict(
   brief: string,
   tasks: TaskResult[],
@@ -20,18 +19,6 @@ export async function leadNotesFromConflict(
   if (usable.length < 2) return { conflict: 'none' };
 
   const pair = usable.slice(0, 2);
-  const conflict = await judgeConflict({
-    brief,
-    outputs: pair.map((task) => ({ title: task.title, output: task.output })),
-  });
-  if (conflict === 'skip') return { conflict: 'skip' };
-  if (conflict === 'ask_boss') {
-    return {
-      conflict: 'ask_boss',
-      notes: 'These outputs might conflict. The boss should review them before they are treated as agreed.',
-    };
-  }
-
   const debateTopic = `Do these two outputs conflict for the brief: "${brief}"?`;
   onEvent?.({ type: 'society-debating' });
   const debateResult = await runNegotiation(debateTopic, [
@@ -44,7 +31,7 @@ export async function leadNotesFromConflict(
     onEvent: (event) => onEvent?.({ ...event, topic: debateTopic }),
   });
   return {
-    conflict: conflict === 'legacy' ? 'legacy' : 'debate',
+    conflict: 'debate',
     negotiation: debateResult,
     notes: debateResult.outcome === 'consensus' ? debateResult.synthesis : undefined,
   };

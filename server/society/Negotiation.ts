@@ -8,7 +8,6 @@
  * with a mock and run live with any LLM provider.
  */
 
-import { judgeEscalation } from './decider/gates';
 
 /** Minimal structural type any LLM provider satisfies (Qwen / NVIDIA both do). */
 export interface NegotiationLLM {
@@ -191,19 +190,10 @@ export async function runNegotiation(
 
     const top = scores[0];
     const second = scores[1];
-    const legacyDecisive = !!(top && top.score >= threshold && (!second || top.score - second.score >= margin));
-    const judged = await judgeEscalation({
-      topic,
-      scores,
-      arguments: turns.map((turn) => ({ agent: turn.agent, argument: turn.argument })),
-    });
-    if ((judged === 'consensus' || (judged === 'legacy' && legacyDecisive)) && top) {
+    const decisive = !!(top && top.score >= threshold && (!second || top.score - second.score >= margin));
+    if (decisive && top) {
       const synthesis = await refereeSynthesis(provider, refModel, topic, top, transcript);
       return { topic, rounds: round, transcript, scores, outcome: 'consensus', winner: top.agent, synthesis };
-    }
-    if (judged === 'escalate') {
-      const synthesis = await refereeEscalation(provider, refModel, topic, scores, transcript);
-      return { topic, rounds: round, transcript, scores, outcome: 'escalate', synthesis };
     }
   }
 

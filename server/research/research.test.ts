@@ -1,23 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { assertPublicWebTarget } from '../proxyGuard';
-import { beginResearch, quickResearch, researchForTask, researchSearchCount, researchSources } from './research';
+import { quickResearch } from './research';
 import { readUrl } from './readUrl';
-import type { DecisionRecord } from '../society/decider';
 
 const publicResolve = async () => ['93.184.216.34'];
-
-function record(policy: DecisionRecord['policy']): DecisionRecord {
-  return {
-    question: 'needs_web',
-    answer: { type: 'noul', noul: policy === 'proceed' ? 0.95 : 0.5 },
-    probabilities: null,
-    policy,
-    latencyMs: 10,
-    pinnedModel: 'jev-1.13.0',
-    returnedModel: 'jev-1.13.0',
-    tokens: null,
-  };
-}
 
 describe('research URL guard', () => {
   it('allows a public http page and refuses loopback before any fetch', async () => {
@@ -39,47 +25,6 @@ describe('research URL guard', () => {
     }, publicResolve);
     expect(requested).toBe('https://r.jina.ai/http://example.com/notes');
     expect(text).toContain('peanuts');
-  });
-
-  it('searches only when Jev says proceed, and stops after five searches', async () => {
-    process.env.AGORA_DECIDER = 'jev';
-    try {
-      beginResearch();
-      const search = async (query: string) => [{ title: query, url: 'https://example.com/a', snippet: 'a fact' }];
-      const read = async () => 'page body';
-      const first = await researchForTask(
-        { title: 'Check the price', prompt: 'today' },
-        'brief',
-        { decideImpl: async () => [record('proceed')], search, read },
-      );
-      expect(first).toContain('https://example.com/a');
-      expect(researchSources()).toHaveLength(1);
-
-      const skipped = await researchForTask(
-        { title: 'Rewrite the intro', prompt: 'from the brief' },
-        'brief',
-        { decideImpl: async () => [record('ask_boss')], search, read },
-      );
-      expect(skipped).toBe('');
-      expect(researchSearchCount()).toBe(1);
-
-      for (let i = 0; i < 5; i++) {
-        await researchForTask(
-          { title: `Topic ${i}`, prompt: 'latest' },
-          'brief',
-          { decideImpl: async () => [record('proceed')], search, read },
-        );
-      }
-      expect(researchSearchCount()).toBe(5);
-      const blocked = await researchForTask(
-        { title: 'One more', prompt: 'latest' },
-        'brief',
-        { decideImpl: async () => [record('proceed')], search, read },
-      );
-      expect(blocked).toBe('');
-    } finally {
-      delete process.env.AGORA_DECIDER;
-    }
   });
 
   it('strips utm params and reads only the top two hits', async () => {

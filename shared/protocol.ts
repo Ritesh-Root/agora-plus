@@ -34,25 +34,6 @@ export interface RoomChatMessage {
   forPlayerId?: string;
 }
 
-export interface DecisionWire {
-  question: string;
-  policy: 'proceed' | 'fallback' | 'ask_boss';
-  answer: string;
-  confidence: number | null;
-  latencyMs: number;
-  error?: string;
-}
-
-export interface RunSummaryWire {
-  decisions: number;
-  inputTokens: number;
-  jevCostUsd: number;
-  searches: number;
-  sources: Array<{ title: string; url: string }>;
-  comparisonMeasured: false;
-  comparisonNote: string;
-}
-
 export interface SocietyResultWire {
   brief: string;
   tasks: Array<{
@@ -102,11 +83,6 @@ export interface SocietyResultWire {
     repairCalls?: number;
     phases?: { managerMs: number; workersMs: number; beforeSynthesisMs: number; leadMs: number };
   };
-  research?: {
-    searches: number;
-    sources: Array<{ title: string; url: string }>;
-  };
-  summary?: RunSummaryWire;
 }
 
 export type ClientMessage =
@@ -119,7 +95,6 @@ export type ClientMessage =
   | { type: 'run-society'; brief: string; baseUrl?: string; apiKey?: string; model?: string; agents?: { name: string; description: string; model?: string; baseUrl?: string; apiKey?: string }[] }
   | { type: 'run-benchmark'; brief: string; baseUrl?: string; apiKey?: string; model?: string }
   | { type: 'room-chat'; text: string; baseUrl?: string; apiKey?: string; model?: string; agents?: { name: string; description: string; model?: string; baseUrl?: string; apiKey?: string }[] }
-  | { type: 'decision-reply'; id: string; action: 'approve' | 'edit' | 'reject'; text?: string }
   | { type: 'cancel-run' };
 
 export type ServerMessage =
@@ -132,7 +107,7 @@ export type ServerMessage =
   | { type: 'player-left'; playerId: string }
   | { type: 'session-ended' }
   | { type: 'society-started'; brief: string; taskCount: number }
-  | { type: 'society-task-update'; taskId: string; title: string; role: string; status: 'running' | 'done' | 'healing' | 'escalated'; output?: string; attempt?: number; researching?: boolean }
+  | { type: 'society-task-update'; taskId: string; title: string; role: string; status: 'running' | 'done' | 'healing' | 'escalated'; output?: string; attempt?: number }
   | { type: 'society-negotiation'; topic: string; round: number; agent: string; argument: string; scores?: Array<{ agent: string; score: number; reason: string }> }
   | { type: 'society-stage'; stage: 'debating' | 'assembling' | 'repairing' }
   | { type: 'society-run-status'; runId: string; status: 'cancel_requested' | 'stopped' }
@@ -141,6 +116,4 @@ export type ServerMessage =
   | { type: 'society-error'; error: string }
   | { type: 'room-chat'; message: RoomChatMessage }
   | { type: 'room-chat-history'; messages: RoomChatMessage[] }
-  | { type: 'benchmark-result'; society: SocietyResultWire; single: { output: string; wallMs: number; model: string }; qualityScores: { society: number; single: number } | null }
-  | { type: 'society-decision'; decision: DecisionWire }
-  | { type: 'decision-request'; id: string; decision: DecisionWire };
+  | { type: 'benchmark-result'; society: SocietyResultWire; single: { output: string; wallMs: number; model: string }; qualityScores: { society: number; single: number } | null };

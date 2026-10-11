@@ -297,23 +297,6 @@ export const SocietyPanel: React.FC = () => {
             </div>
           )}
 
-          {result?.summary && (
-            <div data-testid="run-summary" className="rounded-2xl border border-zinc-200 bg-white p-4 space-y-2">
-              <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 block">Run summary</span>
-              <p className="text-xs font-medium text-zinc-700">
-                {result.summary.decisions} Jev decisions · {result.summary.comparisonMeasured ? `${result.summary.jevCostUsd.toFixed(6)} dollars` : 'Jev cost unavailable'} · {result.summary.searches} web searches
-              </p>
-              <p className="text-[11px] text-zinc-500 leading-relaxed">{result.summary.comparisonNote}</p>
-              {result.summary.sources.length > 0 && (
-                <ul className="text-[11px] text-zinc-600 space-y-1">
-                  {result.summary.sources.map((source) => (
-                    <li key={source.url}>{source.title}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
           {/* Metrics Summary */}
           {result && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-zinc-100">

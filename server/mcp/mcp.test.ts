@@ -37,7 +37,6 @@ const ENV_KEYS = [
   'AGORA_HOUSEHOLD_PASSCODE',
   'AGORA_PUBLIC_URL',
   'AGORA_SERVER_LLM',
-  'AGORA_DECIDER',
   'DASHSCOPE_API_KEY',
   'EXA_API_KEY',
   'FIRECRAWL_API_KEY',
@@ -111,7 +110,6 @@ beforeEach(async () => {
   process.env.AGORA_HOUSEHOLD_PASSCODE = 'home-pass';
   delete process.env.AGORA_PUBLIC_URL;
   delete process.env.AGORA_SERVER_LLM;
-  delete process.env.AGORA_DECIDER;
   delete process.env.DASHSCOPE_API_KEY;
   delete process.env.EXA_API_KEY;
   delete process.env.FIRECRAWL_API_KEY;

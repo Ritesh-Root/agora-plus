@@ -2,8 +2,6 @@ import { getAllAgents } from '../data/agents';
 import { useCoreStore } from '../integration/store/coreStore';
 import { getActiveAgentSet } from '../integration/store/teamStore';
 import { Engine } from './core/Engine';
-import { useSocietyStore } from '../integration/store/societyStore';
-import { useDecisionStore } from '../interface/decisionStore';
 
 interface FlatAgent {
   name: string;
@@ -94,25 +92,6 @@ export class FlatOffice {
       ctx.fillStyle = agent.color || '#17150f';
       ctx.arc(agent.x, agent.y, 10, 0, Math.PI * 2);
       ctx.fill();
-      const latest = useDecisionStore.getState().decisions.at(-1);
-      const researching = useSocietyStore.getState().tasks.some((task) => task.researching) && index === 0;
-      if (researching) {
-        ctx.font = '14px system-ui, sans-serif';
-        ctx.fillText('🌐', agent.x - 7, agent.y - 16);
-      }
-      if (latest && index === 0) {
-        ctx.fillStyle = '#fcfaf4';
-        ctx.strokeStyle = '#17150f';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(agent.x - 8, agent.y - 46, 132, 28, 8);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#17150f';
-        ctx.font = '600 10px "Schibsted Grotesk", system-ui, sans-serif';
-        const label = `${latest.policy} · ${latest.confidence == null ? latest.answer : latest.confidence.toFixed(2)} · ${latest.latencyMs} ms`;
-        ctx.fillText(label.slice(0, 28), agent.x - 2, agent.y - 28);
-      }
       ctx.fillStyle = '#17150f';
       ctx.font = '600 11px "Schibsted Grotesk", system-ui, sans-serif';
       ctx.fillText(agent.name, agent.x + 14, agent.y + 4);

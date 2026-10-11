@@ -6,8 +6,8 @@ Do not put article sentences on screen. Say the complaints in our own words. The
 
 Two setups:
 
-- **Fast path, no AWS.** Remember, the shopping list, the briefing, and recall. Polly returns 503 and the page uses the browser voice, or the meter says "text only" when no audio starts. Read the meter. It is time to first audio. That number is `TODO(measure)`. Do not read the older acknowledgement timings (5 ms on the wire, 50 ms and 63 ms on screen, or the phase 6 band of 55–58 ms) as time to first audio.
-- **Bedrock on.** The plan, the yes, and Keeper's spoken line need `AGORA_SERVER_LLM=bedrock` and AWS credentials. Without them, "plan dinners" says "Planning is unavailable right now." and does not show an approval card. Model-path latency and a successful Polly synthesize are `TODO(measure)`.
+- **Fast path, no AWS.** Remember, the shopping list, the briefing, and recall. Polly returns 503 and the page uses the browser voice, or the meter says "text only" when no audio starts. Read the meter. It is time to first audio. It has not been measured: the build machine's browsers had no speech voices. Do not read the older acknowledgement timings (5 ms on the wire, 50 ms and 63 ms on screen, or the phase 6 band of 55–58 ms) as time to first audio.
+- **Bedrock on.** The plan, the yes, and Keeper's spoken line need `AGORA_SERVER_LLM=bedrock` and AWS credentials. Without them, "plan dinners" says "Planning is unavailable right now." and does not show an approval card. Model-path latency and a successful Polly synthesize were not measured.
 
 Say the page is an unofficial simulated Alexa+ experience. Do not show a light, a lock, a Hue routine, a calendar, or a countdown. The office shot is the four names and the summary line. Do not linger on the bundled 3D models. They are CC BY-NC and `/alexa` does not need them.
 
@@ -78,7 +78,7 @@ Record this beat with Bedrock so the steps are real.
 
 **Say.** "Agora, Scout, Planner, and Keeper. The line on screen is the one the house hears."
 
-Swarm latency is `TODO(measure)`. If the document is still writing, cut on that line.
+On Qwen 2.5 32B through Featherless, a six-step picnic plan finished in about 24 seconds, and the four-step dinner plan in the video took 136 seconds. Bedrock was not measured. If the document is still writing, cut on that line.
 
 ## 1:46 — Claude Code (about 24 seconds)
 
@@ -90,7 +90,7 @@ claude mcp add --transport http agora http://127.0.0.1:3000/mcp --header "Author
 
 **Utterance in Claude Code.** `What is Mia allergic to?`
 
-**On screen.** The reply names peanuts. The tool trace is `recall` or `ask_agora` against this server. `recall` says both facts when they tie. `ask_agora` with no model names the top saved fact. Round-trip time: `TODO(measure)`.
+**On screen.** The reply names peanuts. The tool trace is `recall` or `ask_agora` against this server. `recall` says both facts when they tie. `ask_agora` with no model names the top saved fact. Round-trip time for the `recall` call itself, measured with curl on loopback on 12 Oct 2026: median 3.8 ms over 11 calls (2.8–8.4 ms). Claude's own thinking time comes on top.
 
 **Say.** "Same file. Claude Code is another client. ChatGPT and a live Alexa+ add-on were not part of this take. They can connect to the same server."
 

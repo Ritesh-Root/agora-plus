@@ -212,13 +212,9 @@ Every name in `.env.example`. Empty in that file means unset. Do not commit real
 
 | Variable | Required | Default | What it does |
 | --- | --- | --- | --- |
-| `TYPESAFE_API_KEY` | optional | none | Key for the TypeSafe decider. `JEV_API_KEY` is an accepted alias. Server only. |
-| `AGORA_DECIDER` | optional | `legacy` | `legacy` keeps the previous checks. `jev` uses the three System One gates. Any other value is treated as `legacy`. |
-| `TYPESAFE_BASE_URL` | optional | `https://api.typesafe.ai` | Decider base URL. |
-| `JEV_MODEL` | optional | `jev-1.13.0` | Decider model id. |
 | `DASHSCOPE_API_KEY` | optional | none | Server key for the Qwen Cloud writing model. Token Plan keys (`sk-sp-…`) use the Token Plan host. |
 | `AGORA_TIMEZONE` | optional | the server zone | IANA zone for "due today", "at 6pm", and "in 10 minutes". Times are stored as ISO 8601 with a numeric offset. The server reads this name. `.env.example` does not list it yet. |
-| `EXA_API_KEY` | optional | none | Web search for tasks the decider marks as needing current information, and a fallback for `web_research`. Server only. |
+| `EXA_API_KEY` | optional | none | Web search for `ask_agora` and `web_research` when `FIRECRAWL_API_KEY` is unset. Server only. |
 | `AGORA_PUBLIC_URL` | required off loopback | request origin on loopback | Public HTTPS origin, no path. OAuth resource identifier and discovery issuer when set. OAuth and `/mcp` return 503 when this is unset and the process is not bound to loopback. |
 | `AGORA_TRUST_PROXY` | optional | unset | Set to `1` before `X-Forwarded-Proto` sets the Secure cookie or the OAuth issuer. Otherwise that header is ignored. |
 | `AGORA_OAUTH_REDIRECT_URIS` | required for a public Alexa redirect | none | Comma-separated exact `redirect_uri` values. Anything else is rejected. The simulator's own `http://127.0.0.1`, `http://localhost`, and `::1` callbacks are always allowed. |

@@ -7,7 +7,6 @@ import InfoModal from './InfoModal';
 import { MessageSquareWarning, PartyPopper, Siren, Loader2 } from 'lucide-react';
 import { Task, useCoreStore } from '../integration/store/coreStore';
 import { useTeamStore, useActiveTeam } from '../integration/store/teamStore';
-import { useDecisionStore } from './decisionStore';
 import { USER_COLOR, USER_COLOR_LIGHT, USER_COLOR_SOFT } from '../theme/brand';
 
 
@@ -97,7 +96,6 @@ const UIOverlay: React.FC = () => {
   } = useCoreStore();
   const system = useActiveTeam();
   const npcAgents = getAllAgents(system);
-  const latestDecision = useDecisionStore((state) => state.decisions[state.decisions.length - 1]);
   const allPossibleAgents = getAllCharacters(system);
 
   const selectedAgent = selectedNpcIndex != null ? allPossibleAgents.find(a => a.index === selectedNpcIndex) as any ?? null : null;
@@ -106,25 +104,6 @@ const UIOverlay: React.FC = () => {
 
   return (
     <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden select-none">
-      {latestDecision && npcAgents[0] && npcScreenPositions[npcAgents[0].index] && (
-        <div
-          data-testid="decision-float"
-          className="absolute z-20 w-44 rounded-2xl border border-zinc-200 bg-white/95 px-3 py-2 shadow-lg"
-          style={{
-            left: npcScreenPositions[npcAgents[0].index].x,
-            top: npcScreenPositions[npcAgents[0].index].y,
-            transform: 'translate(-50%, -120%)',
-          }}
-        >
-          <p className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{latestDecision.question}</p>
-          <p className="text-[11px] font-black text-ink">
-            {latestDecision.policy} · {latestDecision.confidence == null ? latestDecision.answer : latestDecision.confidence.toFixed(2)} · {latestDecision.latencyMs} ms
-          </p>
-          <div className="mt-1 h-1 overflow-hidden rounded-full bg-zinc-100">
-            <div className="h-full bg-butter" style={{ width: `${Math.max(0, Math.min(1, latestDecision.confidence ?? 0)) * 100}%` }} />
-          </div>
-        </div>
-      )}
       {/* 1. Parallel Alert Bubbles System */}
       {npcAgents.map((agent) => {
         const pos = npcScreenPositions[agent.index];

@@ -30,7 +30,7 @@ The office uses this provider when the browser did not send a key and `AGORA_SER
 
 The client is created with a 90 second timeout and one retry. Preview and spoken-summary stages use 20 seconds and no retries. Worker, debate, assemble, and repair stages use 90 seconds and one retry ([server/llm/bedrockProvider.ts](../server/llm/bedrockProvider.ts)). A 429 or throttle is "The model is busy right now. Try again in a moment."
 
-IAM: `bedrock-mantle:CreateInference` on `arn:aws:bedrock-mantle:*:*:project/*`. The policy is below. A live `messages.create` was not recorded. `aws sts get-caller-identity` in the phase 3 shell returned `NoCredentials` ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)). Bedrock and Polly run only when AWS credentials are present. Latency for a real Bedrock turn, and time to first audio, are `TODO(measure)`.
+IAM: `bedrock-mantle:CreateInference` on `arn:aws:bedrock-mantle:*:*:project/*`. The policy is below. A live `messages.create` was not recorded. `aws sts get-caller-identity` in the phase 3 shell returned `NoCredentials` ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)). Bedrock and Polly run only when AWS credentials are present. Latency for a real Bedrock turn, and time to first audio, were not measured.
 
 ## Calls per voice turn
 
@@ -56,7 +56,7 @@ The preview above is the planning call. Approval starts `runSociety` with `prese
 From [server/society/Orchestrator.ts](../server/society/Orchestrator.ts) and [server/society/Negotiation.ts](../server/society/Negotiation.ts):
 
 - One Messages call per worker attempt. `MAX_ATTEMPTS` is 2 (the first try and one retry).
-- When at least two worker outputs are usable, the default decider debates. `.env.example` sets `AGORA_DECIDER=legacy`, and that path debates whenever two usable outputs exist. [server/society/leadNotes.ts](../server/society/leadNotes.ts) sends the first two of those outputs into the debate. Each round is one call per position plus one referee call. A decisive round adds one synthesis call. Otherwise the loop runs up to `maxRounds` (default 2) and then one escalation call.
+- When at least two worker outputs are usable, they are debated. [server/society/leadNotes.ts](../server/society/leadNotes.ts) sends the first two of those outputs into the debate. Each round is one call per position plus one referee call. A decisive round adds one synthesis call. Otherwise the loop runs up to `maxRounds` (default 2) and then one escalation call.
 - One lead merge call when any worker finished with text.
 - Up to `MAX_DOCUMENT_REPAIRS` (2) more lead calls, only when the brief matches the word-limit or section checks in [server/society/documentCheck.ts](../server/society/documentCheck.ts). `householdBrief` in [server/household/actions.ts](../server/household/actions.ts) is the goal plus up to eight memory lines. It does not add "under 400 words" or the four section names.
 - One fast-model spoken summary after the document is saved ([server/runEngine.ts](../server/runEngine.ts)). That call is outside `runSociety`'s tally.
@@ -69,7 +69,7 @@ How many workers the preview produces depends on the model. This page does not t
 
 A voice turn asks Polly for the acknowledgement (a cache hit after the warm-up) and for the spoken reply (a cache hit only if that sentence was spoken before). Each miss is one `SynthesizeSpeech`. The route is `POST /api/tts`. No credentials, or a Polly error, returns 503 `tts_unavailable`, and the browser speaks instead.
 
-Polly latency on a successful synthesize is `TODO(measure)`. The phase 4 log recorded a 503 in about 2 seconds when the shell had no AWS credentials ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)).
+Polly latency on a successful synthesize was not measured. The phase 4 log recorded a 503 in about 2 seconds when the shell had no AWS credentials ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)).
 
 IAM: `polly:SynthesizeSpeech` on `*`.
 

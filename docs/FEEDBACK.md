@@ -93,7 +93,7 @@ A live call was not made. The phase 3 shell had no AWS credentials.
 
 **What worked.** The fallback is the right shape for a demo machine with no credentials. The cache key (engine, voice, text) is enough. The voice page does not block the acknowledgement on Polly: the SSE `ack` event goes out first.
 
-**What needs work.** With no credentials, TTS returned 503 `tts_unavailable` in about 2 seconds ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)). That delay is the failure path, not speech. A successful neural synthesize is `TODO(measure)`. The meter now records time to first audio only when playback starts, and says "text only" when it does not. Headless Chromium's `speechSynthesis` never fired `onstart` during the phase 4b pass ([docs/FRICTION_LOG.md](FRICTION_LOG.md)).
+**What needs work.** With no credentials, TTS returned 503 `tts_unavailable` in about 2 seconds ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)). That delay is the failure path, not speech. A successful neural synthesize was not measured. The meter now records time to first audio only when playback starts, and says "text only" when it does not. Headless Chromium's `speechSynthesis` never fired `onstart` during the phase 4b pass ([docs/FRICTION_LOG.md](FRICTION_LOG.md)).
 
 **Onboarding.** The API is small. Document the 503-plus-browser-fallback as a normal local path, and document that time to first audio needs a voice engine that actually starts.
 

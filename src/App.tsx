@@ -20,7 +20,6 @@ import { useRosterStore } from './network/RosterStore';
 import { SceneContext } from './simulation/SceneContext';
 import { SceneManager } from './simulation/SceneManager';
 import ReplayBar from './interface/ReplayBar';
-import BossCard from './interface/BossCard';
 import { networkClient } from './network/NetworkClient';
 import { startReplay } from './replay/playReplay';
 
@@ -148,7 +147,6 @@ const App: React.FC = () => {
         {/* Join Gate — blocks interaction until connected to the host */}
         {!hasJoined && <JoinModal />}
         <ReplayBar />
-        <BossCard />
 
         {/* Final output — fixed viewport overlay */}
         <FinalOutputModal />

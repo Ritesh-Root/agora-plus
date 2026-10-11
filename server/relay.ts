@@ -201,7 +201,7 @@ export function relayPlugin(): Plugin {
 export function attachRelay(httpServer: Server): void {
   warmAcknowledgements();
   let wss: WebSocketServer | null = null;
-  const { room, sockets, broadcastAll, pendingBoss } = getHub();
+  const { room, sockets, broadcastAll } = getHub();
       let replyChain = Promise.resolve();
 
       const broadcastExcept = (excludeId: string, msg: ServerMessage): void => {
@@ -246,13 +246,6 @@ export function attachRelay(httpServer: Server): void {
           }
 
           switch (msg.type) {
-            case 'decision-reply': {
-              const wait = pendingBoss.get(msg.id);
-              if (!wait) break;
-              pendingBoss.delete(msg.id);
-              wait({ action: msg.action, text: msg.text });
-              break;
-            }
             case 'join': {
               if (playerId) return;
               const requested = typeof msg.resumeId === 'string' ? msg.resumeId.trim() : '';

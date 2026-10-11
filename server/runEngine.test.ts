@@ -12,7 +12,6 @@ import type { ServerProvider } from './society/provider';
 let dir = '';
 
 beforeEach(async () => {
-  delete process.env.AGORA_DECIDER;
   dir = await mkdtemp(path.join(tmpdir(), 'agora-run-'));
   setDataDir(dir);
   getHub().room.endSession();

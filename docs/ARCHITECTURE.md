@@ -29,7 +29,7 @@ flowchart LR
   sim --> polly
 ```
 
-The runs recorded for this entry are the voice simulator and Claude Code with the development token. MCP clients such as Alexa+ add-ons, Claude, and ChatGPT can connect. Those two were not run, and the add-on manifest still uses `<host>`. Speech audio is Polly when AWS credentials are present, and the browser voice when Polly returns 503. Bedrock runs only with those credentials. Time to first audio and a live model call are `TODO(measure)`.
+The runs recorded for this entry are the voice simulator and Claude Code with the development token. MCP clients such as Alexa+ add-ons, Claude, and ChatGPT can connect. Those two were not run, and the add-on manifest still uses `<host>`. Speech audio is Polly when AWS credentials are present, and the browser voice when Polly returns 503. Bedrock runs only with those credentials. Time to first audio and a live model call were not measured.
 
 ## Voice simulator
 

@@ -14,7 +14,7 @@ import { setDataDir } from './store';
 
 let dir = '';
 const saved = new Map<string, string | undefined>();
-const ENV = ['AGORA_SERVER_LLM', 'AGORA_DECIDER', 'DASHSCOPE_API_KEY', 'EXA_API_KEY', 'FIRECRAWL_API_KEY', 'AGORA_TIMEZONE'] as const;
+const ENV = ['AGORA_SERVER_LLM', 'DASHSCOPE_API_KEY', 'EXA_API_KEY', 'FIRECRAWL_API_KEY', 'AGORA_TIMEZONE'] as const;
 
 beforeEach(async () => {
   for (const key of ENV) saved.set(key, process.env[key]);

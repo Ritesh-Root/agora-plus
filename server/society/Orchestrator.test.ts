@@ -88,7 +88,7 @@ describe('Society Orchestrator', () => {
         return { content: 'Lentil soup on Monday, falafel wraps on Tuesday, and a vegetable lasagne on Wednesday.' };
       },
     };
-    const result = await runSociety('Plan dinners', provider, { judgeOutput: async () => 'accept' });
+    const result = await runSociety('Plan dinners', provider, { isValidOutput: () => true });
     const failed = result.tasks.find((task) => task.id === 'b');
     expect(failed?.status).toBe('escalated');
     expect(failed?.failure).toBeInstanceOf(Error);
@@ -272,26 +272,5 @@ describe('dependency waves', () => {
     const result = await runSociety('A short brief', provider);
     expect(result.tasks.find((task) => task.id === 'b')?.status).toBe('done');
     expect(result.tasks.find((task) => task.id === 'b')?.output).toBe('b-done');
-  });
-});
-
-describe('Jev worker judgment', () => {
-  it('accepts on the first try when the judge accepts an output the legacy check would reject', async () => {
-    const provider = makeMockProvider();
-    const result = await runSociety('Build a landing page', provider, {
-      judgeOutput: async (_task, output) => output.startsWith('ERROR') ? 'accept' : 'accept',
-    });
-    const writeTask = result.tasks.find((task) => task.id === 't3');
-    expect(writeTask?.status).toBe('done');
-    expect(writeTask?.attempts).toBe(1);
-    expect(writeTask?.output.startsWith('ERROR')).toBe(true);
-  });
-
-  it('escalates immediately when the judge asks the boss', async () => {
-    const result = await runSociety('Build a landing page', makeMockProvider(), {
-      judgeOutput: async () => 'escalate',
-    });
-    expect(result.tasks.every((task) => task.status === 'escalated' && task.attempts === 1)).toBe(true);
-    expect(result.metrics.phases.workersMs).toBeGreaterThanOrEqual(0);
   });
 });

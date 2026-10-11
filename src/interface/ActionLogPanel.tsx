@@ -4,7 +4,6 @@ import { getAgentSet, getAllAgents } from '../data/agents'
 import { USER_COLOR, USER_COLOR_LIGHT } from '../theme/brand'
 import { DebugLogEntry, useCoreStore } from '../integration/store/coreStore'
 import { useTeamStore, useActiveTeam } from '../integration/store/teamStore'
-import { useDecisionStore } from './decisionStore'
 import { formatTokens } from './ProjectView'
 
 function formatTime(ts: number): string {
@@ -329,9 +328,8 @@ export function ActionLogPanel() {
     const { setLogOpen, actionLog, debugLog, logFilterAgentIndex } = useCoreStore()
     const activeTeam = useActiveTeam();
     const agents = getAllAgents(activeTeam);
-    const [activeTab, setActiveTab] = useState<'activity' | 'technical' | 'decisions'>('technical')
+    const [activeTab, setActiveTab] = useState<'activity' | 'technical'>('technical')
     const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false)
-    const decisions = useDecisionStore((state) => state.decisions)
     const topRef = useRef<HTMLDivElement>(null)
 
     const handleDownloadAll = () => {
@@ -501,13 +499,6 @@ ${JSON.stringify(entry.raw, null, 2)}
                 >
                     Technical
                 </button>
-                <button
-                    data-testid="log-tab-decisions"
-                    onClick={() => setActiveTab('decisions')}
-                    className={`flex-1 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${activeTab === 'decisions' ? 'bg-ink text-white shadow-sm' : 'text-zinc-500 hover:text-ink'}`}
-                >
-                    Decisions
-                </button>
             </div>
 
             {/* Entries */}
@@ -545,19 +536,6 @@ ${JSON.stringify(entry.raw, null, 2)}
                                 </div>
                             )
                         })
-                    )
-                ) : activeTab === 'decisions' ? (
-                    decisions.length === 0 ? (
-                        <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest text-center py-16">No decisions yet...</p>
-                    ) : (
-                        decisions.map((decision, index) => (
-                            <div key={`${decision.question}-${index}`} className="rounded-2xl border border-zinc-100 bg-white px-3 py-2">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-ink">{decision.question}</p>
-                                <p className="mt-1 text-[11px] font-medium text-zinc-600">
-                                    {decision.policy} · {decision.confidence == null ? decision.answer : decision.confidence.toFixed(2)} · {decision.latencyMs} ms
-                                </p>
-                            </div>
-                        ))
                     )
                 ) : (
                     debugEntries.length === 0 ? (
