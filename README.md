@@ -6,7 +6,7 @@ The surfaces that were run for this entry are the unofficial voice page at `/ale
 
 It is the AGORA office plus a household layer added for the Amazon Developer Hackathon (Alexa+ track). The office still draws the session in 3D. The household cast there is Agora, Scout, Planner, and Keeper. The new surface is the voice page, the MCP server, and files on disk.
 
-![Voice simulator on a desktop](docs/images/alexa-sim-desktop.png)
+![The household Home after a finished plan](docs/images/home-desktop.jpg)
 
 ## Why
 
@@ -36,20 +36,19 @@ The file map is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Screenshots
 
-Captured:
+All captured from the running app on 10 and 12 Oct 2026.
 
-![Voice simulator, desktop](docs/images/alexa-sim-desktop.png)
+<img src="docs/images/home-phone.jpg" alt="The same Home on a phone" width="300" />
 
-![Voice simulator, phone](docs/images/alexa-sim-mobile.png)
+Claude Code, a separate MCP client, answering from the same household. The output of a real `claude -p` run, set as text:
 
-![The office](docs/images/agora-office.jpg)
+![Claude Code calling recall and list_tasks on the household MCP server](docs/images/claude-mcp-recall.png)
 
-Still to capture, under `docs/images/`:
+A `forget` request sent over MCP comes back as `needs_approval` and waits on the Home page for a person:
 
-- `docs/images/household-panel.png` — Household panel with a fact you can edit
-- `docs/images/office-household-run.png` — Agora, Scout, Planner, and Keeper during a plan
-- `docs/images/mcp-inspector.png` — Inspector tool list and OAuth
-- `docs/images/claude-mcp-recall.png` — Claude Code asking what Mia is allergic to
+![A forget request from MCP waiting under "Waiting for you"](docs/images/mcp-approval.jpg)
+
+![The 3D office](docs/images/agora-office.jpg)
 
 ## Quick start
 

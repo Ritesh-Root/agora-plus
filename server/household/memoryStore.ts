@@ -164,6 +164,18 @@ function keywords(query: string): string[] {
   return query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 0 && !STOP_WORDS.has(word));
 }
 
+/**
+ * Same word, or the same root: "allergy" finds "allergic", "medicine" finds "medication", "peanut" finds
+ * "peanuts". Both words need five letters and a shared start that leaves at most three letters over.
+ */
+function sameRoot(a: string, b: string): boolean {
+  if (a === b) return true;
+  const shorter = Math.min(a.length, b.length);
+  if (shorter < 5) return false;
+  const need = Math.max(5, shorter - 3);
+  return a.slice(0, need) === b.slice(0, need);
+}
+
 interface RankedMemory {
   entry: MemoryEntry;
   score: number;
@@ -173,10 +185,10 @@ interface RankedMemory {
 function rankMemories(query: string, entries: MemoryEntry[]): { ranked: RankedMemory[]; words: string[] } {
   const words = keywords(query);
   const ranked = entries.map((entry) => {
-    const hay = new Set(keywords(`${entry.text} ${entry.tags.join(' ')} ${entry.who ?? ''}`));
+    const hay = keywords(`${entry.text} ${entry.tags.join(' ')} ${entry.who ?? ''}`);
     let keywordHits = 0;
     for (const word of words) {
-      if (hay.has(word)) keywordHits += 1;
+      if (hay.some((other) => sameRoot(word, other))) keywordHits += 1;
     }
     const person = entry.who?.toLowerCase();
     const aboutPerson = !!person && words.includes(person);

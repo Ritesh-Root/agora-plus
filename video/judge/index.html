@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AGORA+ Judge Cut</title>
+<!--
+  Judge cut of the AGORA+ submission video (2:47). Scenes 1-8 and the close reuse the Devpost captures of
+  the household Home. Scenes 9-14 add what the judges score: a real Claude Code session against the same
+  household, the lock-down, the architecture, the AWS path, the Alexa+ package, and the open repo.
+  Creative brief adapted from two prompts in the opus-video-prompts library (MIT):
+    @daniel_haida  https://x.com/daniel_haida/status/2104139720829636937  (restrained product film; soundtrack synthesized in code)
+    @jhylee95      https://x.com/jhylee95/status/2103604431627452427      (hook in the first second, distinct proof beats, cuts on the beat)
+  Every frame is a pure function of time: window.seek(t). Cues come from audio/timing.json on a 96 BPM grid.
+  Terminal text is the real output of the runs saved in assets/claude-run.jsonl, assets/noauth.txt, and
+  assets/forget.json, set as text.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=block" rel="stylesheet" />
+<style>
+  :root { --paper: #fbf8f1; --ink: #2e2a22; --soft: #6f685a; --butter: #f2cc46; --gold: #b8901a; --coral: #c4553a; }
+  html, body { margin: 0; background: var(--paper); overflow: hidden; }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0;
+    background: radial-gradient(1400px 820px at 50% 40%, #fffdf8 0%, #f8f3e8 55%, #efe7d6 100%);
+    font-family: 'Schibsted Grotesk', system-ui, sans-serif; color: var(--ink); }
+  #win { position: absolute; left: 0; top: 0; width: 1440px; height: 940px; transform-origin: 0 0; border-radius: 18px; overflow: hidden;
+    background: #f4f0e6; box-shadow: 0 60px 120px -44px rgba(80, 62, 22, 0.45), 0 0 0 1px rgba(46, 42, 34, 0.09); will-change: transform, opacity, filter; }
+  #chrome { position: absolute; left: 0; top: 0; width: 1440px; height: 40px; background: #fbf8f1; border-bottom: 1px solid rgba(46, 42, 34, 0.08); }
+  #chrome i { position: absolute; top: 14px; width: 12px; height: 12px; border-radius: 50%; background: #e3dccb; }
+  #chrome b { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); padding: 4px 18px; border-radius: 999px; background: #efe9dc;
+    font-size: 14px; font-weight: 600; color: #7d7563; white-space: nowrap; }
+  #page { position: absolute; left: 0; top: 40px; width: 1440px; height: 900px; overflow: hidden; }
+  #page img { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; }
+  #phone { position: absolute; left: 0; top: 0; width: 414px; height: 868px; border-radius: 58px; background: #2e2a22; padding: 12px; box-sizing: border-box;
+    box-shadow: 0 60px 120px -44px rgba(80, 62, 22, 0.55); will-change: transform, opacity; }
+  #phone .screen { position: relative; width: 390px; height: 844px; border-radius: 46px; overflow: hidden; background: #f4f0e6; }
+  #phone img { position: absolute; left: 0; top: 0; width: 390px; height: 844px; }
+  #titles, #callouts { position: absolute; inset: 0; pointer-events: none; }
+  .title { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .kicker { font-size: 22px; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold); margin-bottom: 26px; }
+  .line { font-size: 108px; line-height: 1.04; font-weight: 800; letter-spacing: -0.035em; white-space: nowrap; }
+  .line.mid { font-size: 84px; }
+  .line.big { font-size: 210px; font-weight: 900; letter-spacing: -0.045em; }
+  .line.sub { font-size: 40px; font-weight: 600; color: var(--soft); letter-spacing: -0.01em; margin-top: 26px; }
+  .line.foot { font-size: 20px; font-weight: 800; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); margin-top: 36px; }
+  .line.hit { color: var(--coral); }
+  .w { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.04em 0.02em 0.1em; margin: -0.04em 0.11em -0.1em; }
+  .w > span { display: inline-block; will-change: transform; }
+  .plus { color: #e0b52a; }
+  .callout { position: absolute; display: flex; align-items: center; gap: 14px; padding: 16px 26px 16px 18px; border-radius: 999px; background: #fffdf7;
+    box-shadow: 0 18px 40px -18px rgba(80, 62, 22, 0.45), 0 0 0 1px rgba(46, 42, 34, 0.08); font-size: 27px; font-weight: 700; white-space: nowrap; will-change: transform, opacity; }
+  .callout i { width: 14px; height: 14px; border-radius: 50%; background: var(--butter); box-shadow: 0 0 0 5px #fff1c2; flex: none; }
+  .callout.alert i { background: var(--coral); box-shadow: 0 0 0 5px #f6ddd5; }
+  .chip { position: absolute; padding: 10px 18px; border-radius: 999px; background: rgba(255, 253, 247, 0.94); box-shadow: 0 0 0 1px rgba(46, 42, 34, 0.1);
+    font-size: 19px; font-weight: 700; color: var(--soft); white-space: nowrap; will-change: opacity; }
+  #cursor { position: absolute; left: 0; top: 0; width: 38px; height: 38px; will-change: transform, opacity; }
+  #sources { position: absolute; left: 0; right: 0; bottom: 92px; text-align: center; font-size: 19px; font-weight: 600; color: #a39b8a; letter-spacing: 0.02em; opacity: 0; }
+  #foot { position: absolute; right: 64px; bottom: 34px; font-size: 16px; font-weight: 600; color: #a39b8a; letter-spacing: 0.01em; }
+
+  /* terminal: the real output of a run, set as text */
+  #term { position: absolute; left: 290px; top: 168px; width: 1340px; height: 744px; border-radius: 20px; overflow: hidden; background: #2b2721;
+    box-shadow: 0 60px 120px -44px rgba(60, 46, 16, 0.6), 0 0 0 1px rgba(46, 42, 34, 0.2); will-change: transform, opacity; display: none; }
+  #term .bar { height: 46px; background: #37322a; position: relative; }
+  #term .bar i { position: absolute; top: 17px; width: 12px; height: 12px; border-radius: 50%; background: #5a5347; }
+  #term .bar b { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); font: 600 16px 'JetBrains Mono', monospace; color: #a39b8a; white-space: nowrap; }
+  #term .body { padding: 26px 34px; font: 400 22px/1.5 'JetBrains Mono', monospace; color: #efe8d8; }
+  #term .body > div { white-space: pre-wrap; min-height: 33px; }
+  #term .p { color: #f2cc46; font-weight: 700; }
+  #term .dim { color: #9a927f; }
+  #term .err { color: #f08e72; font-weight: 700; }
+  #term .ok { color: #f2cc46; font-weight: 700; }
+  #term .good { color: #a9d38f; }
+  #term .bold { font-weight: 700; color: #fffaf0; }
+  #term .note { color: #c9a64a; font-style: italic; }
+  #term .caret { display: inline-block; width: 12px; height: 26px; margin-left: 2px; vertical-align: -5px; background: #f2cc46; }
+  #term mark { background: rgba(242, 204, 70, 0.22); color: inherit; border-radius: 4px; padding: 0 2px; }
+
+  /* architecture */
+  #arch { position: absolute; inset: 0; display: none; }
+  #arch svg { position: absolute; inset: 0; }
+  .node { position: absolute; box-sizing: border-box; padding: 16px 22px; border-radius: 22px; background: #fffdf7;
+    box-shadow: 0 22px 44px -26px rgba(80, 62, 22, 0.5), 0 0 0 1px rgba(46, 42, 34, 0.09); will-change: transform, opacity; }
+  .node .t { font-size: 27px; font-weight: 800; letter-spacing: -0.015em; white-space: nowrap; }
+  .node .s { font-size: 18px; font-weight: 600; color: var(--soft); margin-top: 4px; white-space: nowrap; }
+  .node.big .t { font: 700 40px 'JetBrains Mono', monospace; letter-spacing: -0.02em; }
+  .node .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .node .pill { padding: 8px 16px; border-radius: 999px; background: #f6efdd; font-size: 22px; font-weight: 800; white-space: nowrap; will-change: transform, opacity; }
+  .node .file { padding: 5px 11px; border-radius: 10px; background: #f6efdd; font: 600 16px 'JetBrains Mono', monospace; white-space: nowrap; will-change: opacity; }
+  .node .tag { position: absolute; right: 18px; top: -13px; padding: 4px 10px; border-radius: 999px; background: #2e2a22; color: #f2cc46; font-size: 14px; font-weight: 800; letter-spacing: 0.08em; opacity: 0; }
+  .node.glow { box-shadow: 0 22px 44px -26px rgba(80, 62, 22, 0.5), 0 0 0 3px #f2cc46, 0 0 0 10px rgba(242, 204, 70, 0.22); }
+
+  /* files */
+  #cards { position: absolute; inset: 0; display: none; }
+  .card { position: absolute; top: 300px; width: 820px; border-radius: 22px; overflow: hidden; background: #fffdf7;
+    box-shadow: 0 40px 80px -40px rgba(80, 62, 22, 0.5), 0 0 0 1px rgba(46, 42, 34, 0.09); will-change: transform, opacity; }
+  .card .head { padding: 16px 26px; background: #f3ecdc; font: 700 19px 'JetBrains Mono', monospace; color: #7d7563; }
+  .card pre { margin: 0; padding: 22px 26px 26px; font: 400 21px/1.55 'JetBrains Mono', monospace; color: #3a352b; white-space: pre-wrap; }
+  .card pre > span { display: block; will-change: opacity; }
+  .card mark { background: transparent; color: inherit; border-radius: 5px; padding: 0 3px; margin: 0 -3px; }
+  .card .k { color: #8a6a10; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="win">
+    <div id="chrome"><i style="left:18px"></i><i style="left:38px"></i><i style="left:58px"></i><b id="chromeLabel">AGORA+ Home</b></div>
+    <div id="page"><img id="imgA" alt="" /><img id="imgB" alt="" /></div>
+  </div>
+  <div id="phone"><div class="screen"><img id="phoneImg" alt="" /></div></div>
+  <div id="term"><div class="bar"><i style="left:20px"></i><i style="left:40px"></i><i style="left:60px"></i><b id="termTitle"></b></div><div class="body" id="termBody"></div></div>
+  <div id="arch"><svg id="edges" width="1920" height="1080" viewBox="0 0 1920 1080"></svg></div>
+  <div id="cards"></div>
+  <div id="titles"></div>
+  <div id="callouts"></div>
+  <div id="sources">Spyglass, Sep 2025 · The Verge, Oct 2026 · Consumer Reports, Dec 2025</div>
+  <svg id="cursor" viewBox="0 0 38 38"><path d="M6 3 L6 29 L12.5 23 L17 33 L21.5 31 L17 21.5 L26 21.5 Z" fill="#2e2a22" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" /></svg>
+  <div id="foot">Captured from the running app · simulated Alexa+ experience, unofficial</div>
+</div>
+<script>
+(async () => {
+  const manifest = await (await fetch('assets/manifest.json')).json();
+  const extra = await (await fetch('assets/judge.json')).json();
+  const timing = await (await fetch('audio/timing.json')).json();
+  const B = { ...manifest.boxes, ...extra.boxes };
+  const S = manifest.seqs;
+  const file = (name) => `assets/${manifest.shots[name]?.file ?? extra.shots[name]?.file ?? `${name}.jpg`}`;
+  const mid = (b, fx = 0.5, fy = 0.5) => ({ x: b.x + b.width * fx, y: b.y + b.height * fy });
+
+  // ---------- timing ----------
+  const T = timing.cues;
+  window.DURATION = timing.duration;
+  window.AUDIO_CUES = T.map((at, i) => ({ file: `audio/j${i + 1}.mp3`, at }));
+  window.MUSIC = 'audio/music.wav';
+  const clamp01 = (x) => Math.min(1, Math.max(0, x));
+  const seg = (t, a, b) => clamp01((t - a) / (b - a));
+  const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+  const easeInOut = (x) => 0.5 - 0.5 * Math.cos(Math.PI * clamp01(x));
+  const LAST = T.length - 1;
+  // Scene cues, by what they show.
+  const CLAUDE = T[8], LOCK = T[9], ARCH = T[10], AWS = T[11], ALEXA = T[12], OPEN = T[13], CLOSE = T[LAST];
+
+  /** Closed-form spring step: 0 at tau <= 0, settles to 1 with a tiny overshoot. */
+  function spring(tau, hz = 0.8, zeta = 0.86) {
+    if (tau <= 0) return 0;
+    const w = 2 * Math.PI * hz;
+    const wd = w * Math.sqrt(1 - zeta * zeta);
+    return 1 - Math.exp(-zeta * w * tau) * (Math.cos(wd * tau) + (zeta * w / wd) * Math.sin(wd * tau));
+  }
+  /** A channel that changes target at keyframes; one spring per change, summed. */
+  function springTrack(keys, field, hz) {
+    return (t) => {
+      let v = keys[0][field];
+      // A `jump` key is a hard cut: the camera is already there when the new shot appears.
+      for (let i = 1; i < keys.length; i++) v += (keys[i][field] - keys[i - 1][field]) * (keys[i].jump ? (t >= keys[i].t ? 1 : 0) : spring(t - keys[i].t, hz));
+      return v;
+    };
+  }
+  /** In with a spring at a, out with an ease ending at b. */
+  const inOut = (t, a, b, hz = 1.1) => clamp01(spring(t - a, hz, 0.9)) * (1 - ease(seg(t, b - 0.35, b)));
+
+  // ---------- places on the captured pages (CSS px of the 1440x900 viewport) ----------
+  const input = mid(B['idle-input'], 0.35);
+  const receipt = mid(B.receipt, 1, 0.5);
+  const shopping = mid(B['shop-shopping']);
+  const milk = mid(B.milk);
+  const basket = { x: B.basket.x + 60, y: B.basket.y + B.basket.height / 2 };
+  const approvalCard = mid(B.approvalCard);
+  const approve = mid(B.approve);
+  const plans = mid(B['plans-done']);
+  const readPlan = mid(B.readPlan);
+  const traceFast = mid(B['trace-fast']);
+  const waiting = mid(B.waiting);
+  const waitApprove = { x: B.waiting.x + 67, y: B.waiting.y + 109 };
+  const FULL = { cx: 720, cy: 450, z: 0.94 };
+  const TYPING = { cx: 470, cy: 480, z: 1.5 };
+  const CAPTION = { cx: 410, cy: 500, z: 1.75 };
+
+  // ---------- what the window shows ----------
+  const shots = [];
+  const show = (t, name, cut = true) => shots.push({ t, src: file(name), cut });
+  const seq = (name, t0, t1, from = 0, to) => {
+    const frames = S[name] ?? [];
+    const last = to ?? frames.length - 1;
+    const count = last - from;
+    for (let i = from; i <= last; i++) {
+      const p = count > 0 ? (i - from) / count : 0;
+      shots.push({ t: t0 + (t1 - t0) * p, src: `assets/${frames[i].file}`, cut: true });
+    }
+  };
+  /** A scroll sequence on an eased clock, so the page glides like a trackpad scroll. */
+  const glide = (name, t0, t1) => {
+    const frames = S[name] ?? [];
+    const n = frames.length - 1;
+    for (let i = 0; i <= n; i++) {
+      let lo = 0, hi = 1;
+      for (let k = 0; k < 24; k++) { const m = (lo + hi) / 2; if (easeInOut(m) < i / n) lo = m; else hi = m; }
+      shots.push({ t: t0 + (t1 - t0) * lo, src: `assets/${frames[i].file}`, cut: true });
+    }
+  };
+
+  show(0, 'home-idle');
+  show(T[1] + 2.8, 'home-idle');
+  glide('tour', T[1] + 4.7, T[1] + 8.6);
+  show(T[2] + 1.0, 'home-idle');
+  seq('remember-type', T[2] + 1.7, T[2] + 3.2);
+  show(T[2] + 3.3, 'remember-after-0');
+  show(T[2] + 3.8, 'remember-after-1', false);
+  show(T[2] + 4.6, 'remember-after-2', false);
+  show(T[2] + 5.5, 'remember-after-3', false);
+  show(T[2] + 6.2, 'remember-done', false);
+  glide('family', T[2] + 7.3, T[2] + 8.7);
+  show(T[2] + 8.75, 'family-allergy');
+  seq('recall-type', T[3] + 1.4, T[3] + 2.6);
+  show(T[3] + 2.7, 'recall-after-0');
+  show(T[3] + 3.1, 'recall-after-1', false);
+  show(T[3] + 3.9, 'recall-after-2', false);
+  show(T[3] + 4.7, 'recall-after-3', false);
+  show(T[3] + 5.4, 'recall-hood', false);
+  seq('shopping-type', T[4] + 1.35, T[4] + 2.35);
+  show(T[4] + 2.4, 'shopping-after-0');
+  show(T[4] + 2.85, 'shopping-after-1', false);
+  show(T[4] + 3.4, 'shopping-after-2', false);
+  show(T[4] + 3.95, 'shopping-done', false);
+  show(T[4] + 5.45, 'milk-ticked-0');
+  show(T[4] + 6.1, 'milk-ticked-1', false);
+  show(T[4] + 7.0, 'basket-open');
+  seq('briefing-type', T[5] + 1.35, T[5] + 2.05);
+  show(T[5] + 2.1, 'briefing-after-0');
+  show(T[5] + 2.55, 'briefing-after-1', false);
+  show(T[5] + 3.2, 'briefing-after-2', false);
+  show(T[5] + 4.0, 'briefing-after-3', false);
+  seq('plan-type', T[6] + 1.35, T[6] + 2.35);
+  show(T[6] + 2.4, 'plan-after-0');
+  show(T[6] + 2.8, 'plan-after-1', false);
+  show(T[6] + 3.25, 'plan-after-2', false);
+  show(T[6] + 3.7, 'plan-approval', false);
+  show(T[6] + 6.7, 'plan-approved-0');
+  show(T[6] + 7.5, 'plan-approved-1', false);
+  const TEAM_END = Math.min(S.team.length - 1, S.team.findIndex((f) => (f.tasks ?? []).length >= 4 && f.tasks.every((x) => x.endsWith(':done'))) + 2);
+  seq('team', T[7] + 1.0, T[7] + 6.4, 0, TEAM_END);
+  show(T[7] + 6.6, 'plan-done');
+  show(T[7] + 11.55, 'plan-sheet');
+  show(T[7] + 13.1, 'plan-sheet-2', false);
+  // The forget request that came in over MCP, waiting on the Home page.
+  show(LOCK + 7.75, 'mcp-waiting');
+  show(OPEN + 0.9, 'repo-top');
+  show(CLOSE + 0.0, 'home-final');
+  shots.sort((a, b) => a.t - b.t);
+  const chromeAt = (t) => (t >= OPEN && t < CLOSE ? 'github.com/Ritesh-Root/agora-plus' : 'AGORA+ Home');
+
+  // ---------- camera ----------
+  const cam = [
+    { t: 0, ...FULL },
+    { t: T[1] + 2.8, ...FULL, z: 0.9 },
+    { t: T[1] + 4.6, ...FULL, z: 0.96 },
+    { t: T[2] + 1.0, ...TYPING },
+    { t: T[2] + 3.6, ...CAPTION },
+    { t: T[2] + 7.2, cx: 1000, cy: 430, z: 1.25 },
+    { t: T[2] + 8.6, cx: 1110, cy: 400, z: 1.6 },
+    { t: T[3] + 0.95, ...TYPING },
+    { t: T[3] + 3.1, ...CAPTION },
+    { t: T[3] + 5.3, cx: Math.min(1120, traceFast.x + 80), cy: traceFast.y + 50, z: 1.7 },
+    { t: T[4] + 0.95, ...TYPING },
+    { t: T[4] + 3.0, cx: shopping.x - 40, cy: shopping.y, z: 1.7 },
+    { t: T[4] + 7.6, cx: 690, cy: 420, z: 1.4 },
+    { t: T[5] + 0.95, ...TYPING },
+    { t: T[5] + 2.6, ...CAPTION },
+    { t: T[5] + 4.9, cx: 560, cy: 175, z: 1.75 },
+    { t: T[6] + 0.95, ...TYPING },
+    { t: T[6] + 3.9, cx: approvalCard.x + 130, cy: approvalCard.y - 10, z: 1.75 },
+    { t: T[7] + 0.95, cx: 1030, cy: 400, z: 1.5 },
+    { t: T[7] + 6.8, cx: plans.x - 70, cy: plans.y - 40, z: 1.95 },
+    { t: T[7] + 10.4, cx: plans.x - 40, cy: plans.y + 40, z: 1.6 },
+    // Cut straight to the readable part of the plan (the model's first draft line above it is garbled).
+    { t: T[7] + 11.55, cx: 1070, cy: 640, z: 1.5, jump: true },
+    // The MCP request waiting on Home: start wide on the card, then settle in.
+    { t: LOCK + 7.75, cx: waiting.x - 40, cy: waiting.y + 120, z: 1.3, jump: true },
+    { t: LOCK + 8.0, cx: waiting.x - 120, cy: waiting.y + 70, z: 1.62 },
+    { t: OPEN + 0.9, ...FULL, jump: true },
+    { t: OPEN + 3.3, cx: 790, cy: 420, z: 1.08 },
+    { t: CLOSE - 0.05, cx: 1180, cy: 470, z: 0.78 },
+  ];
+  const camX = springTrack(cam, 'cx', 0.7);
+  const camY = springTrack(cam, 'cy', 0.7);
+  const camZ = springTrack(cam, 'z', 0.7);
+
+  // ---------- window on screen ----------
+  const winOn = [[T[1] + 2.8, T[2]], [T[2] + 1.0, T[3]], [T[3] + 0.95, T[4]], [T[4] + 0.95, T[5]], [T[5] + 0.95, T[6]], [T[6] + 0.95, T[7]], [T[7] + 0.95, CLAUDE],
+    [LOCK + 7.75, ARCH], [OPEN + 0.9, CLOSE + 3.4]];
+  function winAlpha(t) {
+    for (const [a, b] of winOn) {
+      if (t >= a - 0.01 && t <= b + 0.01) return Math.min(ease(seg(t, a, a + 0.45)), 1 - ease(seg(t, b - 0.35, b)));
+    }
+    return 0;
+  }
+
+  // ---------- cursor ----------
+  const cursorKeys = [
+    { t: 0, x: 900, y: 760 },
+    { t: T[2] + 1.15, x: 900, y: 760 }, { t: T[2] + 1.25, x: input.x + 30, y: input.y + 6 },
+    { t: T[4] + 4.4, x: input.x + 30, y: input.y + 6 }, { t: T[4] + 4.5, x: milk.x + 120, y: milk.y + 90 }, { t: T[4] + 4.7, x: milk.x, y: milk.y + 2 },
+    { t: T[4] + 6.2, x: basket.x, y: basket.y + 3 },
+    { t: T[6] + 5.2, x: approvalCard.x + 220, y: approvalCard.y + 140 }, { t: T[6] + 5.6, x: approve.x, y: approve.y + 3 },
+    { t: T[7] + 10.3, x: readPlan.x + 160, y: readPlan.y + 120 }, { t: T[7] + 10.5, x: readPlan.x, y: readPlan.y + 3 },
+    { t: LOCK + 9.4, x: waitApprove.x + 190, y: waitApprove.y + 150 }, { t: LOCK + 9.6, x: waitApprove.x + 6, y: waitApprove.y + 4 },
+  ];
+  const curX = springTrack(cursorKeys, 'x', 1.1);
+  const curY = springTrack(cursorKeys, 'y', 1.1);
+  const cursorOn = [[T[2] + 1.2, T[2] + 3.5], [T[3] + 1.05, T[3] + 1.45], [T[4] + 1.05, T[4] + 1.4], [T[4] + 4.5, T[4] + 7.3], [T[5] + 1.05, T[5] + 1.4], [T[6] + 1.05, T[6] + 1.4], [T[6] + 5.1, T[6] + 7.2], [T[7] + 10.2, T[7] + 11.8],
+    [LOCK + 9.35, ARCH - 0.4]];
+  const clicks = [T[2] + 1.5, T[3] + 1.25, T[4] + 1.2, T[4] + 5.35, T[4] + 6.85, T[5] + 1.2, T[6] + 1.2, T[6] + 6.6, T[7] + 11.4];
+
+  // ---------- titles: words rise on the phrase they are spoken with ----------
+  const P = (i, rel) => T[i] + rel;
+  const titles = [
+    { t0: P(0, 0.12), t1: P(0, 3.35), lines: [{ text: 'Voice assistants', cls: 'mid' }, { text: 'were supposed to run the house', cls: 'mid', at: P(0, 0.9) }] },
+    { t0: P(0, 3.6), t1: T[1] - 0.25, lines: [
+      { text: 'Simple commands lag.', cls: 'mid', at: P(0, 3.65) },
+      { text: 'Big jobs stall halfway.', cls: 'mid', at: P(0, 5.3) },
+      { text: 'It forgets what you said.', cls: 'mid hit', at: P(0, 7.25) },
+    ] },
+    { t0: P(1, 0.1), t1: P(1, 2.75), lines: [{ text: 'AGORA+', cls: 'big' }, { text: 'Your household assistant, upgraded', cls: 'sub', at: P(1, 0.7) }] },
+    { t0: T[2] + 0.05, t1: T[2] + 1.2, kicker: '01 · Memory', lines: [{ text: 'Tell it once' }] },
+    { t0: T[3] + 0.05, t1: T[3] + 1.15, kicker: '02 · Recall', lines: [{ text: 'Answers from memory' }] },
+    { t0: T[4] + 0.05, t1: T[4] + 1.15, kicker: '03 · Lists', lines: [{ text: 'One page for the house' }] },
+    { t0: T[5] + 0.05, t1: T[5] + 1.15, kicker: '04 · Briefing', lines: [{ text: 'What matters, first' }] },
+    { t0: T[6] + 0.05, t1: T[6] + 1.15, kicker: '05 · Approval', lines: [{ text: 'It asks first' }] },
+    { t0: T[7] + 0.05, t1: T[7] + 1.15, kicker: '06 · Team', lines: [{ text: 'A team, not a chatbot' }] },
+    { t0: CLAUDE + 0.05, t1: CLAUDE + 1.2, kicker: '07 · Any client', lines: [{ text: 'One brain, every surface' }] },
+    { t0: LOCK + 0.05, t1: LOCK + 1.1, kicker: '08 · Lock-down', lines: [{ text: 'Locked by default' }] },
+    { t0: ARCH + 0.05, t1: ARCH + 1.15, kicker: '09 · Architecture', lines: [{ text: 'One protocol, one server' }] },
+    { t0: AWS + 0.05, t1: AWS + 1.5, kicker: '10 · AWS', lines: [{ text: 'Built for Bedrock and Polly' }] },
+    { t0: ALEXA + 0.05, t1: ALEXA + 1.2, kicker: '11 · Alexa+', lines: [{ text: 'Packaged to ship' }] },
+    { t0: OPEN + 0.05, t1: OPEN + 0.85, kicker: '12 · Open source', lines: [{ text: 'MIT, on GitHub' }] },
+    { t0: P(LAST, 3.55), t1: 999, lines: [
+      { text: 'AGORA+', cls: 'big' },
+      { text: 'Remembers · Asks first · Shows its work', cls: 'sub', words: [P(LAST, 3.9), P(LAST, 4.95), P(LAST, 4.95), P(LAST, 5.01), P(LAST, 6.35), P(LAST, 6.35), P(LAST, 6.41), P(LAST, 6.47)] },
+      { text: 'github.com/Ritesh-Root/agora-plus · MIT · Amazon Developer Hackathon 2026', cls: 'foot', at: P(LAST, 7.4) },
+    ] },
+  ];
+  const titleRoot = document.getElementById('titles');
+  for (const title of titles) {
+    const el = document.createElement('div');
+    el.className = 'title';
+    title.starts = [];
+    if (title.kicker) {
+      const k = document.createElement('div');
+      k.className = 'kicker';
+      k.innerHTML = `<span class="w"><span>${title.kicker}</span></span>`;
+      el.appendChild(k);
+      title.starts.push(title.t0);
+    }
+    for (const line of title.lines) {
+      const l = document.createElement('div');
+      l.className = `line ${line.cls ?? ''}`;
+      const words = line.text.split(' ');
+      l.innerHTML = words.map((word) => `<span class="w"><span>${word === 'AGORA+' ? 'AGORA<span class="plus">+</span>' : word}</span></span>`).join('');
+      el.appendChild(l);
+      words.forEach((_, j) => title.starts.push(line.words?.[j] ?? (line.at ?? title.t0) + j * 0.06));
+    }
+    titleRoot.appendChild(el);
+    title.el = el;
+    title.words = [...el.querySelectorAll('.w > span')];
+  }
+
+  // ---------- callouts and chips ----------
+  const callouts = [
+    { t0: P(1, 3.4), t1: P(1, 7.2), text: 'Runs on your own server', screen: { x: 120, y: 968 } },
+    { t0: T[2] + 4.4, t1: T[2] + 7.0, text: 'Verified = read back from disk', at: receipt, dx: 34, dy: -30 },
+    { t0: T[2] + 8.9, t1: T[3] - 0.3, text: 'Every plan is checked against this', screen: { x: 1200, y: 662 } },
+    { t0: T[3] + 5.7, t1: T[4] - 0.3, text: 'No model call', at: traceFast, dx: -640, dy: -10 },
+    { t0: T[6] + 6.9, t1: T[7] - 0.35, text: 'Only a person can approve', screen: { x: 1010, y: 200 } },
+    { t0: T[7] + 8.8, t1: T[7] + 11.2, text: "Keeper flagged Mia's allergy", screen: { x: 150, y: 440 }, alert: true },
+    { t0: CLAUDE + 7.45, t1: LOCK - 0.4, text: 'Same household file as the Home page', screen: { x: 1080, y: 950 } },
+    { t0: LOCK + 9.0, t1: ARCH - 0.35, text: 'Sent over MCP · waits for a person', screen: { x: 830, y: 446 } },
+    { t0: OPEN + 3.6, t1: CLOSE - 0.1, text: 'MIT licence · tests run on every push', screen: { x: 120, y: 960 } },
+  ];
+  const chips = [
+    { t0: T[7] + 1.2, t1: T[7] + 6.5, text: 'Live run · sped up', screen: { x: 120, y: 918 } },
+    { t0: T[7] + 6.7, t1: T[7] + 11.3, text: `Finished in ${Math.round(((S.team.at(-1)?.at ?? 136)))} s`, screen: { x: 120, y: 918 } },
+    { t0: T[7] + 1.2, t1: CLAUDE - 0.3, text: 'Plans by Qwen 2.5 32B, an open model, via Featherless', screen: { x: 120, y: 980 } },
+    { t0: CLAUDE + 2.2, t1: LOCK - 0.4, text: 'Real Claude Code session (claude -p) · output set as text', screen: { x: 290, y: 940 } },
+    { t0: LOCK + 1.2, t1: LOCK + 7.6, text: 'Real requests against the running server', screen: { x: 290, y: 940 } },
+    { t0: AWS + 2.2, t1: ALEXA - 0.3, text: 'Bedrock and Polly paths are in the code · not recorded live (no AWS credentials)', screen: { x: 498, y: 1000 } },
+    { t0: ALEXA + 4.6, t1: OPEN - 0.3, text: 'Add-on not deployed yet · Alexa+ is US-only', screen: { x: 735, y: 940 } },
+  ];
+  const calloutRoot = document.getElementById('callouts');
+  for (const c of callouts) {
+    const el = document.createElement('div');
+    el.className = `callout${c.alert ? ' alert' : ''}`;
+    el.innerHTML = `<i></i><span>${c.text}</span>`;
+    calloutRoot.appendChild(el);
+    c.el = el;
+  }
+  for (const c of chips) {
+    const el = document.createElement('div');
+    el.className = 'chip';
+    el.textContent = c.text;
+    calloutRoot.appendChild(el);
+    c.el = el;
+  }
+
+  // ---------- terminal sessions (real output, set as text) ----------
+  // cls: p = prompt line that types, plus the classes in the CSS. `type` is seconds of typing.
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const sessions = [
+    {
+      t0: CLAUDE + 1.1, t1: LOCK - 0.05, title: '~/household — claude',
+      lines: [
+        { at: CLAUDE + 2.3, type: 1.55, cmd: true, text: 'claude -p "What is Mia allergic to, and what\'s on our shopping list?" \\' },
+        { at: CLAUDE + 3.9, type: 0.35, cmd: 'cont', text: '    --mcp-config agora.json' },
+        { at: CLAUDE + 4.3, text: '' },
+        { at: CLAUDE + 4.55, html: '<span class="ok">●</span> <span class="bold">agora · recall</span> <span class="dim">{"query":"Mia allergy"}</span>' },
+        { at: CLAUDE + 5.0, html: '<span class="dim">  ⎿ </span>I remember this: Mia is allergic to peanuts.' },
+        { at: CLAUDE + 5.6, html: '<span class="ok">●</span> <span class="bold">agora · list_tasks</span> <span class="dim">{"list":"shopping","status":"open"}</span>' },
+        { at: CLAUDE + 6.05, html: '<span class="dim">  ⎿ </span>There are 4 on the shopping list. First is Oat milk.' },
+        { at: CLAUDE + 6.5, text: '' },
+        { at: CLAUDE + 7.35, html: '<span class="bold">Mia\'s allergy:</span> <mark>peanuts.</mark>' },
+        { at: CLAUDE + 7.6, text: '' },
+        { at: CLAUDE + 7.8, html: '<span class="bold">Shopping list (4 open items):</span>' },
+        { at: CLAUDE + 8.0, text: '- Oat milk' },
+        { at: CLAUDE + 8.1, text: '- Eggs' },
+        { at: CLAUDE + 8.2, text: '- Basmati rice' },
+        { at: CLAUDE + 8.3, text: '- Spinach' },
+        { at: CLAUDE + 8.5, text: '' },
+        { at: CLAUDE + 8.7, text: 'Nothing on the list conflicts with the peanut allergy. For future shopping, check labels on packaged items for peanut traces.' },
+        { at: CLAUDE + 9.6, html: '<span class="good">✓ 6.9 s · 4 turns · claude-sonnet-5-5 · tools from the agora MCP server</span>' },
+      ],
+    },
+    {
+      t0: LOCK + 1.0, t1: LOCK + 7.75, title: '~/household — curl',
+      lines: [
+        { at: LOCK + 1.25, type: 1.2, cmd: true, text: 'curl -si -X POST http://127.0.0.1:3300/mcp' },
+        { at: LOCK + 3.05, html: '<span class="err">HTTP/1.1 401 Unauthorized</span>' },
+        { at: LOCK + 3.2, html: '<span class="dim">Date: Sun, 11 Oct 2026 18:55:18 GMT</span>' },
+        { at: LOCK + 3.25, html: '<span class="dim">Connection: keep-alive</span>' },
+        { at: LOCK + 3.3, html: '<span class="dim">Keep-Alive: timeout=5</span>' },
+        { at: LOCK + 3.35, html: '<span class="dim">Transfer-Encoding: chunked</span>' },
+        { at: LOCK + 3.8, html: '<span class="note"># no token: empty body, no WWW-Authenticate header</span>' },
+        { at: LOCK + 4.1, text: '' },
+        { at: LOCK + 4.7, type: 1.15, cmd: true, text: './mcp.sh forget \'{"query":"Sam is vegetarian"}\'' },
+        { at: LOCK + 5.95, html: '<span class="note"># tools/call with the household token · result.structuredContent</span>' },
+        { at: LOCK + 6.2, text: '{' },
+        { at: LOCK + 6.25, html: '  "status": <mark class="ok">"needs_approval"</mark>,' },
+        { at: LOCK + 6.3, text: '  "approvalId": "32facd5f-4f91-445c-944f-30591a282d76",' },
+        { at: LOCK + 6.35, text: '  "speech": "Forget that Sam is vegetarian? Say yes or no."' },
+        { at: LOCK + 6.4, text: '}' },
+      ],
+    },
+  ];
+  const term = document.getElementById('term');
+  const termBody = document.getElementById('termBody');
+  const termTitle = document.getElementById('termTitle');
+  for (const s of sessions) {
+    s.els = s.lines.map((line) => {
+      const el = document.createElement('div');
+      if (line.html !== undefined) el.innerHTML = line.html;
+      else if (!line.cmd) el.textContent = line.text;
+      return el;
+    });
+  }
+  let shownSession = null;
+  function drawTerm(t) {
+    const s = sessions.find((x) => t >= x.t0 - 0.05 && t <= x.t1 + 0.05);
+    if (!s) { term.style.display = 'none'; return; }
+    if (shownSession !== s) {
+      termBody.replaceChildren(...s.els);
+      termTitle.textContent = s.title;
+      shownSession = s;
+    }
+    const a = inOut(t, s.t0, s.t1, 1.0);
+    term.style.display = a > 0.003 ? 'block' : 'none';
+    term.style.opacity = String(a);
+    term.style.transform = `translateY(${(1 - a) * 30}px) scale(${0.985 + a * 0.015})`;
+    let typingAt = -1;
+    s.lines.forEach((line, i) => {
+      const el = s.els[i];
+      const on = t >= line.at;
+      const waitingPrompt = i === 0 && !on;
+      el.style.visibility = on || waitingPrompt ? 'visible' : 'hidden';
+      if (waitingPrompt) {
+        el.innerHTML = `<span class="p">$ </span>${Math.floor(t * 2) % 2 === 0 ? '<span class="caret"></span>' : ''}`;
+        return;
+      }
+      if (!line.cmd) return;
+      const n = line.type ? Math.round(line.text.length * seg(t, line.at, line.at + line.type)) : line.text.length;
+      const typing = on && n < line.text.length;
+      if (typing) typingAt = i;
+      const prompt = line.cmd === 'cont' ? '' : '<span class="p">$ </span>';
+      el.innerHTML = `${prompt}${esc(line.text.slice(0, on ? n : 0))}${typing ? '<span class="caret"></span>' : ''}`;
+    });
+    // An idle caret blinks on the next prompt line once the output is in.
+    if (typingAt < 0 && t > s.lines.at(-1).at + 0.3) {
+      const last = s.els.at(-1);
+      if (!last.querySelector('.caret') && Math.floor(t * 2) % 2 === 0) last.insertAdjacentHTML('beforeend', '<span class="caret" style="margin-left:14px"></span>');
+      else if (Math.floor(t * 2) % 2 === 1) last.querySelector('.caret')?.remove();
+    }
+  }
+
+  // ---------- architecture ----------
+  const arch = document.getElementById('arch');
+  const edgesSvg = document.getElementById('edges');
+  const NODES = {
+    home: { x: 130, y: 250, w: 340, h: 92, t: 'Home page', s: 'voice + screen', at: ARCH + 1.25 },
+    claude: { x: 130, y: 372, w: 340, h: 92, t: 'Claude Code', s: 'a separate MCP client', at: ARCH + 1.4 },
+    alexa: { x: 130, y: 494, w: 340, h: 92, t: 'Alexa+ add-on', s: 'packaged, account linking', at: ARCH + 1.55 },
+    any: { x: 130, y: 616, w: 340, h: 92, t: 'Any MCP client', s: 'Streamable HTTP', at: ARCH + 1.7 },
+    oauth: { x: 588, y: 420, w: 236, h: 116, t: 'OAuth 2.1', s: 'PKCE · scopes', at: ARCH + 2.2 },
+    mcp: { x: 922, y: 300, w: 400, h: 330, t: '/mcp', s: 'MCP 2025-11-25 · Streamable HTTP', at: ARCH + 2.75, big: true },
+    actions: { x: 1410, y: 268, w: 410, h: 92, t: 'actions.ts', s: 'one write path · a receipt each', at: ARCH + 8.75 },
+    disk: { x: 1410, y: 404, w: 410, h: 156, t: 'Your disk', s: 'plain JSON and Markdown', at: ARCH + 9.25 },
+    team: { x: 1410, y: 620, w: 410, h: 92, t: 'Agora · Scout · Planner · Keeper', s: 'the household team', at: ARCH + 10.6, small: true },
+    model: { x: 1410, y: 770, w: 410, h: 112, t: 'Claude in Amazon Bedrock', s: 'or any OpenAI-compatible model', at: ARCH + 10.9, aws: true },
+    polly: { x: 130, y: 790, w: 340, h: 92, t: 'Amazon Polly', s: 'speaks for the Home page', at: ARCH + 11.2, aws: true },
+  };
+  const PILLS = [['11 tools', ARCH + 5.3], ['3 resources', ARCH + 6.45], ['2 prompts', ARCH + 7.6], ['approvals before side effects', ARCH + 8.0]];
+  const FILES = [['memory.json', ARCH + 9.7], ['tasks.json', ARCH + 9.95], ['runs/', ARCH + 10.2]];
+  for (const [key, n] of Object.entries(NODES)) {
+    const el = document.createElement('div');
+    el.className = `node${n.big ? ' big' : ''}`;
+    Object.assign(el.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.w}px`, height: `${n.h}px` });
+    el.innerHTML = `<div class="t"${n.small ? ' style="font-size:23px"' : ''}>${n.t}</div><div class="s">${n.s}</div>${n.aws ? '<div class="tag">AWS</div>' : ''}`;
+    if (key === 'mcp') {
+      el.insertAdjacentHTML('beforeend', `<div class="row" style="margin-top:28px">${PILLS.map(([p]) => `<span class="pill">${p}</span>`).join('')}</div>`);
+      n.pills = [...el.querySelectorAll('.pill')];
+    }
+    if (key === 'disk') {
+      el.insertAdjacentHTML('beforeend', `<div class="row" style="margin-top:14px">${FILES.map(([f]) => `<span class="file">${f}</span>`).join('')}</div>`);
+      n.files = [...el.querySelectorAll('.file')];
+    }
+    arch.appendChild(el);
+    n.el = el;
+    n.tag = el.querySelector('.tag');
+  }
+  const R = (n, fy = 0.5) => ({ x: n.x + n.w, y: n.y + n.h * fy });
+  const L = (n, fy = 0.5) => ({ x: n.x, y: n.y + n.h * fy });
+  const curve = (a, b) => `M ${a.x} ${a.y} C ${(a.x + b.x) / 2} ${a.y}, ${(a.x + b.x) / 2} ${b.y}, ${b.x} ${b.y}`;
+  const N = NODES;
+  const EDGES = [
+    { d: curve(R(N.home), L(N.oauth, 0.3)), at: ARCH + 1.9, from: 'home' },
+    { d: curve(R(N.claude), L(N.oauth, 0.43)), at: ARCH + 2.0, from: 'claude' },
+    { d: curve(R(N.alexa), L(N.oauth, 0.57)), at: ARCH + 2.1, from: 'alexa' },
+    { d: curve(R(N.any), L(N.oauth, 0.7)), at: ARCH + 2.2, from: 'any' },
+    { d: curve(R(N.oauth), L(N.mcp)), at: ARCH + 2.75, from: 'oauth' },
+    { d: curve(R(N.mcp, 0.2), L(N.actions)), at: ARCH + 8.85, from: 'mcp' },
+    { d: `M ${N.actions.x + 205} ${N.actions.y + N.actions.h} L ${N.disk.x + 205} ${N.disk.y}`, at: ARCH + 9.35, from: 'actions' },
+    { d: curve(R(N.mcp, 0.85), L(N.team)), at: ARCH + 10.7, from: 'mcp' },
+    { d: `M ${N.team.x + 205} ${N.team.y + N.team.h} L ${N.model.x + 205} ${N.model.y}`, at: ARCH + 11.0, from: 'team', aws: true },
+    { d: `M ${N.home.x} ${N.home.y + 46} C ${N.home.x - 70} ${N.home.y + 46}, ${N.polly.x - 70} ${N.polly.y + 46}, ${N.polly.x} ${N.polly.y + 46}`, at: ARCH + 11.3, from: 'home', aws: true },
+  ];
+  for (const e of EDGES) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', e.d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', '#d6ccb4');
+    path.setAttribute('stroke-width', '3');
+    path.setAttribute('stroke-linecap', 'round');
+    edgesSvg.appendChild(path);
+    e.path = path;
+    e.len = path.getTotalLength();
+    path.style.strokeDasharray = `${e.len}`;
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('r', '6');
+    dot.setAttribute('fill', '#e0b52a');
+    edgesSvg.appendChild(dot);
+    e.dot = dot;
+  }
+  const ARCH_IN = ARCH + 1.15;
+  const ARCH_OUT = ALEXA;
+  function drawArch(t) {
+    const a = inOut(t, ARCH_IN, ARCH_OUT, 1.2);
+    arch.style.display = a > 0.003 ? 'block' : 'none';
+    if (a <= 0.003) return;
+    arch.style.opacity = String(a);
+    // During the AWS line, everything that is not AWS steps back.
+    const focus = ease(seg(t, AWS + 1.5, AWS + 2.2));
+    const keyIsAws = (key) => !!NODES[key]?.aws;
+    for (const [key, n] of Object.entries(NODES)) {
+      const p = spring(t - n.at, 1.2, 0.85);
+      const dim = keyIsAws(key) ? 1 : 1 - 0.62 * focus;
+      n.el.style.opacity = String(clamp01(p) * dim);
+      n.el.style.transform = `translateY(${(1 - p) * 22}px) scale(${0.96 + 0.04 * clamp01(p)})`;
+      n.el.classList.toggle('glow', keyIsAws(key) && focus > 0.5);
+      if (n.tag) n.tag.style.opacity = String(focus);
+      if (key === 'disk' && t >= ARCH + 10.15 && t < AWS + 1.5) n.el.classList.toggle('glow', Math.floor((t - ARCH - 10.15) * 2.4) % 2 === 0 && t < ARCH + 11.3);
+    }
+    NODES.mcp.pills.forEach((el, i) => {
+      const p = spring(t - PILLS[i][1], 1.6, 0.8);
+      el.style.opacity = String(clamp01(p));
+      el.style.transform = `scale(${0.7 + 0.3 * p})`;
+    });
+    NODES.disk.files.forEach((el, i) => { el.style.opacity = String(ease(seg(t, FILES[i][1], FILES[i][1] + 0.3))); });
+    for (const e of EDGES) {
+      const p = ease(seg(t, e.at, e.at + 0.7));
+      e.path.style.strokeDashoffset = String(e.len * (1 - p));
+      const dim = e.aws ? 1 : 1 - 0.62 * focus;
+      e.path.style.opacity = String(dim);
+      e.path.setAttribute('stroke', e.aws && focus > 0.5 ? '#e0b52a' : '#d6ccb4');
+      // A request travels each drawn edge on a loop.
+      if (p >= 1) {
+        const f = ((t - e.at - 0.7) / 1.6) % 1;
+        const pt = e.path.getPointAtLength(e.len * f);
+        e.dot.setAttribute('cx', pt.x);
+        e.dot.setAttribute('cy', pt.y);
+        e.dot.style.opacity = String(Math.sin(Math.PI * f) * dim);
+      } else e.dot.style.opacity = '0';
+    }
+  }
+  const awsChips = [
+    { t0: AWS + 3.5, text: 'IAM: bedrock-mantle:CreateInference', x: 1410, y: 900 },
+    { t0: AWS + 7.9, text: 'This recording: Qwen 2.5 32B via Featherless', x: 1410, y: 946 },
+  ].map((c) => {
+    const el = document.createElement('div');
+    el.className = 'chip';
+    el.textContent = c.text;
+    arch.appendChild(el);
+    return { ...c, el };
+  });
+
+  // ---------- files for the Alexa+ scene ----------
+  const cards = document.getElementById('cards');
+  const CARDS = [
+    {
+      x: 120, head: 'alexa-addon/addon.json', at: ALEXA + 1.3, mark: [ALEXA + 2.4, ALEXA + 4.6],
+      lines: [
+        '"accountLinking": {', '  "enabled": true,', '  "type": <mark>"AUTHORIZATION_CODE"</mark>,', '  "pkce": <mark>"S256"</mark>,',
+        '  "scopes": ["mcp:tools", "mcp:resources"],', '  …', '},', '"integrations": [{', '  "type": <mark>"MCP"</mark>,',
+        '  "config": { "endpoints": { "default": {', '    "type": "HTTPS", "uri": "https://&lt;host&gt;/mcp" } } }', '}]',
+      ],
+    },
+    {
+      x: 980, head: 'skills/agora-household/SKILL.md', at: ALEXA + 4.75, mark: [ALEXA + 6.6, ALEXA + 9.6],
+      lines: [
+        '---', '<span class="k">name:</span> agora-household', '<span class="k">description:</span> Saves and reads household memory,',
+        '  tasks, briefings, and approval-gated plans', '  through the AGORA+ MCP server. …', '<span class="k">license:</span> MIT', '---', '',
+        '<mark>Forgetting a fact or starting a plan does not</mark>', '<mark>happen until a person says yes.</mark>', 'Remembering and adding a task do not wait.',
+      ],
+    },
+  ];
+  for (const c of CARDS) {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.style.left = `${c.x}px`;
+    el.innerHTML = `<div class="head">${c.head}</div><pre>${c.lines.map((l) => `<span>${l || ' '}</span>`).join('')}</pre>`;
+    cards.appendChild(el);
+    c.el = el;
+    c.rows = [...el.querySelectorAll('pre > span')];
+    c.marks = [...el.querySelectorAll('mark')];
+  }
+  function drawCards(t) {
+    const on = t >= ALEXA + 1.2 && t <= OPEN + 0.05;
+    cards.style.display = on ? 'block' : 'none';
+    if (!on) return;
+    for (const c of CARDS) {
+      const a = inOut(t, c.at, OPEN, 1.1);
+      c.el.style.opacity = String(a);
+      c.el.style.transform = `translateY(${(1 - a) * 34}px)`;
+      c.rows.forEach((row, i) => { row.style.opacity = String(ease(seg(t, c.at + 0.15 + i * 0.07, c.at + 0.45 + i * 0.07))); });
+      const m = ease(seg(t, c.mark[0], c.mark[0] + 0.4)) * (1 - ease(seg(t, c.mark[1] - 0.3, c.mark[1])));
+      c.marks.forEach((mk) => { mk.style.background = `rgba(242, 204, 70, ${(0.42 * m).toFixed(3)})`; });
+    }
+  }
+
+  // ---------- frame ----------
+  const win = document.getElementById('win');
+  const imgA = document.getElementById('imgA');
+  const imgB = document.getElementById('imgB');
+  const phone = document.getElementById('phone');
+  const phoneImg = document.getElementById('phoneImg');
+  const cursor = document.getElementById('cursor');
+  const chromeLabel = document.getElementById('chromeLabel');
+  const decoded = new Set();
+  async function setImg(img, src) {
+    if (img.dataset.src !== src) {
+      img.dataset.src = src;
+      img.src = src;
+    }
+    if (!decoded.has(src)) {
+      try { await img.decode(); decoded.add(src); } catch { /* the next frame retries */ }
+    }
+  }
+  function currentShot(t) {
+    let i = 0;
+    for (let k = 0; k < shots.length; k++) if (shots[k].t <= t) i = k;
+    const cur = shots[i];
+    const prev = shots[Math.max(0, i - 1)];
+    return { cur: cur.src, prev: prev.src, alpha: cur.cut ? 1 : ease(seg(t, cur.t, cur.t + 0.22)) };
+  }
+  function wordState(title, t) {
+    title.words.forEach((w, i) => {
+      const inP = spring(t - title.starts[i], 1.3, 0.9);
+      const outP = ease(seg(t, title.t1 - 0.38 + i * 0.02, title.t1 - 0.06 + i * 0.02));
+      w.style.transform = `translateY(${(1 - inP) * 112 - outP * 112}%)`;
+    });
+    title.el.style.display = t >= title.t0 - 0.05 && t <= title.t1 + 0.1 ? 'flex' : 'none';
+  }
+  const PHONE_IN = CLOSE + 0.2;
+  const PHONE_OUT = CLOSE + 3.4;
+
+  window.seek = async (t) => {
+    const z = camZ(t);
+    const cx = camX(t);
+    const cy = camY(t);
+    const toScreen = (p) => ({ x: 960 + (p.x - cx) * z, y: 540 + (p.y + 40 - (cy + 40)) * z });
+
+    const a = winAlpha(t);
+    const settle = 1 - a;
+    win.style.transform = `translate(${960 - cx * z}px, ${540 - (cy + 40) * z + settle * 26}px) scale(${z * (1 - settle * 0.025)})`;
+    win.style.opacity = String(a);
+    win.style.filter = settle > 0.01 ? `blur(${(settle * 9).toFixed(2)}px)` : 'none';
+    win.style.display = a > 0.002 ? 'block' : 'none';
+    const label = chromeAt(t);
+    if (chromeLabel.textContent !== label) chromeLabel.textContent = label;
+    const work = [];
+    if (a > 0.002) {
+      const s = currentShot(t);
+      work.push(setImg(imgA, s.prev), setImg(imgB, s.cur));
+      imgB.style.opacity = String(s.alpha);
+    }
+
+    const pin = spring(t - PHONE_IN, 0.9, 0.85);
+    const pout = ease(seg(t, PHONE_OUT - 0.35, PHONE_OUT));
+    const palpha = clamp01(pin) * (1 - pout);
+    phone.style.display = palpha > 0.003 ? 'block' : 'none';
+    if (palpha > 0.003) {
+      phone.style.opacity = String(palpha);
+      phone.style.transform = `translate(${1360 + (1 - pin) * 220}px, ${106 + pout * 20}px) scale(0.98)`;
+      const frames = S.phone;
+      const p = easeInOut(seg(t, PHONE_IN + 0.5, PHONE_OUT - 0.3));
+      const f = frames[Math.round(p * (frames.length - 1))];
+      work.push(setImg(phoneImg, `assets/${f.file}`));
+    }
+
+    drawTerm(t);
+    drawArch(t);
+    for (const c of awsChips) {
+      const al = ease(seg(t, c.t0, c.t0 + 0.35)) * (1 - ease(seg(t, ALEXA - 0.35, ALEXA)));
+      c.el.style.display = al > 0.003 ? 'block' : 'none';
+      c.el.style.opacity = String(al);
+      c.el.style.transform = `translate(${c.x}px, ${c.y}px)`;
+    }
+    drawCards(t);
+    for (const title of titles) wordState(title, t);
+    document.getElementById('sources').style.opacity = String(Math.min(ease(seg(t, P(0, 3.7), P(0, 4.3))), 1 - ease(seg(t, T[1] - 0.6, T[1] - 0.2))));
+
+    for (const c of callouts) {
+      const p = spring(t - c.t0, 1.2, 0.9);
+      const alpha = clamp01(p) * (1 - ease(seg(t, c.t1 - 0.35, c.t1)));
+      c.el.style.display = alpha > 0.003 ? 'flex' : 'none';
+      if (alpha <= 0.003) continue;
+      const pos = c.screen ?? (() => { const sp = toScreen(c.at); return { x: sp.x + (c.dx ?? 0), y: sp.y + (c.dy ?? 0) }; })();
+      c.el.style.opacity = String(alpha);
+      c.el.style.transform = `translate(${pos.x}px, ${pos.y + (1 - p) * 18}px)`;
+    }
+    for (const c of chips) {
+      const alpha = Math.min(ease(seg(t, c.t0, c.t0 + 0.3)), 1 - ease(seg(t, c.t1 - 0.3, c.t1)));
+      c.el.style.display = alpha > 0.003 ? 'block' : 'none';
+      c.el.style.opacity = String(alpha);
+      c.el.style.transform = `translate(${c.screen.x}px, ${c.screen.y}px)`;
+    }
+
+    let cursorAlpha = 0;
+    for (const [c0, c1] of cursorOn) if (t >= c0 && t <= c1) cursorAlpha = Math.min(ease(seg(t, c0, c0 + 0.2)), 1 - ease(seg(t, c1 - 0.2, c1)));
+    cursorAlpha *= a;
+    if (cursorAlpha > 0.003) {
+      const p = toScreen({ x: curX(t), y: curY(t) });
+      let press = 1;
+      for (const k of clicks) press = Math.min(press, 1 - 0.16 * Math.sin(Math.PI * seg(t, k - 0.06, k + 0.16)));
+      cursor.style.display = 'block';
+      cursor.style.opacity = String(cursorAlpha);
+      cursor.style.transform = `translate(${p.x - 6}px, ${p.y - 3}px) scale(${press})`;
+    } else cursor.style.display = 'none';
+
+    await Promise.all(work);
+  };
+
+  await document.fonts.ready;
+  const params = new URLSearchParams(location.search);
+  if (!params.has('render')) {
+    const stage = document.getElementById('stage');
+    const fit = () => { stage.style.transform = `scale(${Math.min(innerWidth / 1920, innerHeight / 1080)})`; };
+    addEventListener('resize', fit);
+    fit();
+    const audio = window.AUDIO_CUES.map((c) => Object.assign(new Audio(c.file), { _at: c.at }));
+    const music = new Audio(window.MUSIC);
+    music.volume = 0.4;
+    const start = performance.now() - (Number(params.get('t')) || 0) * 1000;
+    let busy = false;
+    let musicOn = false;
+    const loop = async () => {
+      const t = (performance.now() - start) / 1000;
+      if (!busy) { busy = true; await window.seek(Math.min(t, window.DURATION)); busy = false; }
+      if (!musicOn) { musicOn = true; music.currentTime = t; music.play().catch(() => {}); }
+      for (const clip of audio) if (!clip._played && t >= clip._at) { clip._played = true; clip.play().catch(() => {}); }
+      if (t < window.DURATION) requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+  await window.seek(0);
+  window.ready = true;
+})();
+</script>
+</body>
+</html>

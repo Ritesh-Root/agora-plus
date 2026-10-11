@@ -161,6 +161,18 @@ describe('speakRecall', () => {
     expect(spoken.speech).toBe('I remember this: Mia is allergic to peanuts.');
   });
 
+  it('matches a word by its root, so "allergy" finds "allergic"', () => {
+    expect(speakRecall('Mia allergy', [mia, jen]).speech).toBe('I remember this: Mia is allergic to peanuts.');
+    expect(speakRecall("Mia's allergies", [mia]).speech).toBe('I remember this: Mia is allergic to peanuts.');
+    expect(speakRecall('Mia peanut', [mia]).speech).toBe('I remember this: Mia is allergic to peanuts.');
+  });
+
+  it('keeps short or different words apart', () => {
+    const veg = { ...mia, id: 'veg', text: 'Sam is vegetarian', who: 'Sam' };
+    expect(speakRecall('vegetables', [veg]).speech).toBe("I don't know.");
+    expect(speakRecall('spark', [{ ...mia, id: 'key', text: 'The spare key is in the drawer', who: undefined }]).speech).toBe("I don't know.");
+  });
+
   it('marks a weak keyword overlap as unsure', () => {
     const spoken = speakRecall('peanuts school', [mia, jen]);
     expect(spoken.speech).toContain("I'm not sure, but I have:");

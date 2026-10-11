@@ -1,0 +1,15 @@
+j1	Voice assistants were supposed to run the house. Instead, simple commands lag, big jobs stall halfway, and they forget what you told them.
+j2	So I built Agora Plus. A household assistant that runs on your own server, with one calm page for the whole home.
+j3	Tell it something once. It writes the fact to your household file, reads it back, and shows you a verified receipt.
+j4	Ask later, and it answers straight from memory. Simple requests never touch a model, so they come back in milliseconds.
+j5	Lists and reminders live on the same page. Add things by voice, and tick them off by hand.
+j6	The morning briefing leads with what matters most. Allergies, medicine, and what's due today.
+j7	Bigger jobs become a plan you can read first. Nothing starts until a person says yes. The model can't approve itself.
+j8	Then a team of agents gets to work. Scout researches, Planner builds the list, and Keeper checks every step against what the family saved, like Mia's peanut allergy.
+j9	And it isn't tied to one screen. Here's Claude Code, a separate app, asking the same household over MCP. Same memory, same answer.
+j10	It's locked down by default. With no token, the server refuses. And a risky request, like forgetting a fact, waits on the family's Home page until a person says yes.
+j11	Under the hood, every surface speaks one open protocol to one server. Eleven tools, three resources, and two prompts. And every write lands in plain files on your own disk.
+j12	It's built for AWS. Switch it to Bedrock, and the agents run on Claude in Amazon Bedrock, with Polly for the voice. This recording used an open model on Featherless instead.
+j13	For Alexa Plus, it's packaged as an MCP add-on with account linking, plus an Agent Skill that teaches any assistant to ask before it acts.
+j14	And it's all open source, under MIT, so any household can run its own.
+j15	Agora Plus. Your home assistant, upgraded. It remembers, it asks first, and it shows its work.
