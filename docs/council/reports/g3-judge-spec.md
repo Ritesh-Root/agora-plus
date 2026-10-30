@@ -53,8 +53,8 @@ Summary: Do not file this yet. The household MCP server, Agent Skill, unofficial
 
 ### JDG-6 Open Source prize text treats a mixed-license repo as one MIT project
 - Severity: P1
-- Area: `LICENSE`, `LICENSE-ASSETS.md`, `docs/SUBMISSION.md`
-- Evidence: `LICENSE:1` "MIT License". `LICENSE-ASSETS.md:9` "3D Assets License: CC BY-NC 4.0" and `LICENSE-ASSETS.md:29` "they must be replaced with original or CC0 assets before any commercial deployment." `docs/SUBMISSION.md:97` tells Devpost "The code license is LICENSE (MIT). 3D assets are CC BY-NC 4.0." Alexa+ and Open Source prizes include "Project featured on Amazon Developer channels" (https://amazonappdev2026.devpost.com/, fetched 8 Oct 2026). `git cat-file -e pre-window:LICENSE` succeeds, so the MIT file predates the 31 Aug 2026 window start stated in the rules.
+- Area: `LICENSE`, `public/models/ASSETS-LICENSE.md`, `docs/SUBMISSION.md`
+- Evidence: `LICENSE:1` "MIT License". `public/models/ASSETS-LICENSE.md:9` "3D Assets License: CC BY-NC 4.0" and `public/models/ASSETS-LICENSE.md:29` "they must be replaced with original or CC0 assets before any commercial deployment." `docs/SUBMISSION.md:97` tells Devpost "The code license is LICENSE (MIT). 3D assets are CC BY-NC 4.0." Alexa+ and Open Source prizes include "Project featured on Amazon Developer channels" (https://amazonappdev2026.devpost.com/, fetched 8 Oct 2026). `git cat-file -e pre-window:LICENSE` succeeds, so the MIT file predates the 31 Aug 2026 window start stated in the rules.
 - Why it matters: Featuring the 3D models can conflict with the non-commercial term the repo already warns about. The Open Source challenge wants a project or contribution made during the window, not only a license that was already on AGORA. The household demo does not need the models. Criterion: Quality of idea, Technical implementation.
 - Fix: In the Open Source answer, say the window contribution is the household MCP branch, code is MIT, and `public/models/` is CC BY-NC and not required to run `/alexa`. If Amazon may feature the video, keep those models out of the video or swap them.
 - Effort: S
@@ -140,7 +140,7 @@ Status is against the Devpost pages fetched on 8 Oct 2026, plus this repo. Amazo
 | One track prize and one mini-challenge prize maximum | met | Entering both minis is allowed; winning both is not. The packet does not ask to win both. | Overview: "each project can only win one track prize and one mini challenge prize" |
 | Available to judges through the judging period (ends 20 Nov 2026) | partly | Local run instructions exist. No public URL, no testing credentials, repo URL unpublished. | Rules "Testing" |
 | Deadline 23 Oct 2026, 12:00 PT | met as a date match | Rules: "Friday, October 23, 2026 (12:00 pm Pacific Time)". Overview: "Oct 23, 2026 @ 7:00pm UTC", which is the same instant while Pacific is UTC−7. | Both Devpost pages |
-| Sponsor IP and third-party terms | partly | MIT code plus CC BY-NC models (`LICENSE-ASSETS.md:9`). Firecrawl and AWS SDKs are normal dependencies. NC models vs a featuring prize is JDG-6. | Rules "Intellectual Property" |
+| Sponsor IP and third-party terms | partly | MIT code plus CC BY-NC models (`public/models/ASSETS-LICENSE.md:9`). Firecrawl and AWS SDKs are normal dependencies. NC models vs a featuring prize is JDG-6. | Rules "Intellectual Property" |
 
 ## Submission packet
 

@@ -481,7 +481,7 @@ Source code is MIT. See [LICENSE](LICENSE).
 Third-party code and assets have their own notices. Those notices stay in the files the licenses require:
 
 - [NOTICE.md](NOTICE.md) — MIT attribution for the upstream office shell, and the CC BY-NC terms for the bundled models.
-- [LICENSE-ASSETS.md](LICENSE-ASSETS.md) — CC BY-NC 4.0 for the 3D assets.
+- [public/models/ASSETS-LICENSE.md](public/models/ASSETS-LICENSE.md) — CC BY-NC 4.0 for the 3D assets.
 - [public/models/README.txt](public/models/README.txt) — the same asset terms, next to the model files.
 
 Maintainer: Ritesh-Root &lt;workstationritalks@gmail.com&gt; · https://github.com/Ritesh-Root

@@ -100,7 +100,7 @@ A live Bedrock call and a successful Polly synthesize were not recorded. The bui
 
 The contribution in the hackathon window is the household MCP work: a self-hosted server (13 tools always, `web_research` when a search key is set, 3 resources, 2 prompts, Streamable HTTP, OAuth), an Agent Skill, and the unofficial `/alexa` voice page, on top of the existing office. The server negotiates protocol 2025-11-25 and newer. Household files live on the server you run. Forgetting a fact or starting a plan waits for a person's yes, and every write returns a receipt read back from disk.
 
-The code license is [LICENSE](../LICENSE) (MIT). Files under `public/models/` are CC BY-NC 4.0 and are not needed to run `/alexa`. See [LICENSE-ASSETS.md](../LICENSE-ASSETS.md).
+The code license is [LICENSE](../LICENSE) (MIT). Files under `public/models/` are CC BY-NC 4.0 and are not needed to run `/alexa`. See [public/models/ASSETS-LICENSE.md](../public/models/ASSETS-LICENSE.md).
 
 `git ls-files` matched only `.env.example` for the secret-filename check (`.env`, `vercel`, `secret`, `credential`, `.pem`, `.key`). No secret file is tracked.
 

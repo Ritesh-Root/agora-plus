@@ -23,7 +23,7 @@ Submissions must explain what changed during the window because AGORA existed be
    - Connect from Claude Code / any MCP client; link to the Agent Skill.
    - "What changed during the hackathon (Aug 31 – Oct 23, 2026)": a short summary plus `git diff --stat pre-window..HEAD`
      totals and a link to `docs/HACKATHON_CHANGES.md`.
-   - Tracks entered: Alexa+ (primary), AWS Builder, Open Source. Licence: MIT (code), see LICENSE-ASSETS.md for assets.
+   - Tracks entered: Alexa+ (primary), AWS Builder, Open Source. Licence: MIT (code), see public/models/ASSETS-LICENSE.md for assets.
    - Honest limits: single household per server, in-memory room, US-only Alexa+ distribution, no device control (see the
      research gap), Web Speech needs Chrome.
 2. `docs/ARCHITECTURE.md` — a Mermaid diagram: Alexa+ / Claude / ChatGPT / the voice simulator → OAuth → `/mcp` →

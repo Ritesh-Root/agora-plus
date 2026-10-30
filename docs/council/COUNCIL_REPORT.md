@@ -194,7 +194,7 @@ P0 and P1. "Verified" means the chair read the cited file and the quote matches.
 | UX-10 | P1 | Legal pages, panel meta text, and the talk-button focus ring fail contrast | `privacy.html`, `index.css`, `HouseholdPanel.tsx` | S | high | colors yes. Ratios not recomputed |
 | UX-11 | P1 | Household and Voice are unlabeled icons | `Header.tsx:237-254` | S | high | yes. Live 24×24 box not re-measured. `size={16}` plus `p-1` is 24px of CSS |
 | JDG-5 | P1 | Quick start opens the old 3D office | `README.md:80` | S | high | yes. Folded into action 2 |
-| JDG-6 | P1 | Open Source text treats a mixed-license repo as one MIT project | `LICENSE`, `LICENSE-ASSETS.md:9` | S | high | yes. `git cat-file` of the pre-window license was not re-run |
+| JDG-6 | P1 | Open Source text treats a mixed-license repo as one MIT project | `LICENSE`, `public/models/ASSETS-LICENSE.md:9` | S | high | yes. `git cat-file` of the pre-window license was not re-run |
 | TST-4 | P1 | Plan-then-yes voice path is untested, and leaving the page drops it | `bridge.test.ts`, `bridge.ts:244-248` | M | high | yes. The three test names match |
 
 P2, kept, not all re-read. Ones the chair happened to confirm are marked.
