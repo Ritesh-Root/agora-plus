@@ -17,6 +17,8 @@ import { resolveApproval } from './household/approvals';
 import { handleSession, householdLockEnabled, householdSessionActive, requestFromLoopback } from './household/session';
 import { readText } from './household/store';
 import { defaultServerProvider } from './llm/serverProvider';
+import { runCouncil, TASTE_OCCASIONS, tasteSnapshot } from './taste/council';
+import type { CouncilRequest, TasteOccasion } from '../shared/taste';
 
 setServerProviderFactory(defaultServerProvider);
 
@@ -45,7 +47,9 @@ type Match =
   | { kind: 'alexa-complete' }
   | { kind: 'alexa-status' }
   | { kind: 'alexa-turn' }
-  | { kind: 'run-document'; id: string };
+  | { kind: 'run-document'; id: string }
+  | { kind: 'taste' }
+  | { kind: 'taste-council' };
 
 function pathnameOf(req: IncomingMessage): string {
   try {
@@ -70,6 +74,8 @@ function matchPath(pathname: string): Match | 'bad-id' | null {
   if (pathname === '/api/household') return { kind: 'household' };
   if (pathname === '/api/memory') return { kind: 'memory' };
   if (pathname === '/api/tasks') return { kind: 'tasks' };
+  if (pathname === '/api/taste') return { kind: 'taste' };
+  if (pathname === '/api/taste/council') return { kind: 'taste-council' };
   const memory = pathname.match(/^\/api\/memory\/([^/]+)$/);
   if (memory) {
     const id = safeId(memory[1]);
@@ -189,6 +195,32 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     });
     req.on('error', () => fail(new HttpError(400, 'The body is not valid JSON.')));
   });
+}
+
+/** POST /api/taste/council body. occasion must be a TasteOccasion; at most 8 names; location at most 80 chars. */
+export function parseCouncilRequest(body: unknown): { ok: true; value: CouncilRequest } | { ok: false; error: string } {
+  const record = asRecord(body);
+  if (!record) return { ok: false, error: 'Send a JSON object.' };
+  const occasion = record.occasion;
+  if (typeof occasion !== 'string' || !(TASTE_OCCASIONS as readonly string[]).includes(occasion)) {
+    return { ok: false, error: `Occasion must be one of ${TASTE_OCCASIONS.join(', ')}.` };
+  }
+  const value: CouncilRequest = { occasion: occasion as TasteOccasion };
+  if (record.who !== undefined) {
+    if (!Array.isArray(record.who) || record.who.some((name) => typeof name !== 'string')) {
+      return { ok: false, error: 'Who must be a list of names.' };
+    }
+    const names = (record.who as string[]).map((name) => name.trim().slice(0, 40)).filter((name) => name.length > 0);
+    if (names.length > 8) return { ok: false, error: 'Ask about at most 8 people.' };
+    if (names.length > 0) value.who = names;
+  }
+  if (record.location !== undefined) {
+    if (typeof record.location !== 'string') return { ok: false, error: 'Location must be a string.' };
+    const location = record.location.trim();
+    if (location.length > 80) return { ok: false, error: 'Location must be at most 80 characters.' };
+    if (location) value.location = location;
+  }
+  return { ok: true, value };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -311,6 +343,32 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, match: Match)
       'Content-Disposition': `attachment; filename="${match.id}.md"`,
     });
     res.end(method === 'HEAD' ? undefined : markdown);
+    return;
+  }
+
+  if (match.kind === 'taste') {
+    if (method !== 'GET') {
+      resume(req);
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    resume(req);
+    sendJson(res, 200, await tasteSnapshot());
+    return;
+  }
+
+  if (match.kind === 'taste-council') {
+    if (method !== 'POST') {
+      resume(req);
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const parsed = parseCouncilRequest(await readJsonBody(req));
+    if (parsed.ok === false) {
+      sendJson(res, 400, { error: parsed.error });
+      return;
+    }
+    sendJson(res, 200, await runCouncil(parsed.value));
     return;
   }
 

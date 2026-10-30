@@ -26,15 +26,17 @@ const RETRY_DELAY_MS = 1_500;
  * Hosted plans cap concurrent requests (Featherless answers extra ones with `no_response`).
  * Every provider in the process shares one queue. AGORA_LLM_CONCURRENCY sets the size; default 2.
  */
-const slots = { busy: 0, waiting: [] as (() => void)[] };
+interface SlotPool { busy: number; waiting: (() => void)[]; limit: () => number }
+
+const sharedSlots: SlotPool = { busy: 0, waiting: [], limit: slotLimit };
 
 function slotLimit(): number {
   const parsed = Number.parseInt(process.env.AGORA_LLM_CONCURRENCY ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
 }
 
-async function takeSlot(signal?: AbortSignal): Promise<() => void> {
-  if (slots.busy >= slotLimit()) {
+async function takeSlot(slots: SlotPool, signal?: AbortSignal): Promise<() => void> {
+  if (slots.busy >= slots.limit()) {
     await new Promise<void>((resolve, reject) => {
       const ready = () => {
         signal?.removeEventListener('abort', aborted);
@@ -63,10 +65,29 @@ const SWARM_STAGES = new Set(['worker', 'assembling', 'repair', 'repairing', 'de
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
+/** Gemini's per-call reasoning token, carried as `extra_content.google.thought_signature`. */
+interface ExtraContent { google?: { thought_signature?: string } }
+
+/**
+ * Gemini 3 returns a thought signature on each function call and rejects the next request
+ * (HTTP 400) unless it comes back on that call. The Messages shape has no slot for it, so it
+ * rides on the tool_use block under this key and goes back out in toChatMessages.
+ */
+export const THOUGHT_SIGNATURE_KEY = 'thought_signature';
+/** Google's documented placeholder for a call whose real signature was lost (old history). */
+export const SKIP_THOUGHT_SIGNATURE = 'skip_thought_signature_validator';
+
+interface ChatToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+  extra_content?: ExtraContent;
+}
+
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;
-  tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
+  tool_calls?: ChatToolCall[];
   tool_call_id?: string;
 }
 
@@ -75,19 +96,33 @@ interface ChatResponse {
   error?: { message?: string; type?: string; code?: string };
   choices?: {
     finish_reason?: string | null;
-    message?: { content?: string | null; tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[] };
+    message?: {
+      content?: string | null;
+      tool_calls?: { id?: string; function?: { name?: string; arguments?: string }; extra_content?: ExtraContent }[];
+    };
   }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
 export interface OpenAiCompatibleOptions {
   baseUrl?: string;
-  apiKey?: string;
+  /** A fixed key, or a supplier called before every request (short-lived OAuth tokens). */
+  apiKey?: string | (() => Promise<string>);
   model?: string;
   fastModel?: string;
   fetch?: Fetch;
   /** Base wait between retries. Tests pass 0. */
   retryDelayMs?: number;
+  /** Sent as `reasoning_effort` for the chosen model when it returns a value. */
+  reasoningEffort?: (model: string) => string | undefined;
+  /** Floor for max_tokens, for models whose reasoning tokens count against it. */
+  minOutputTokens?: number;
+  /** Carry Gemini thought signatures across tool turns. */
+  thoughtSignatures?: boolean;
+  /** Own request queue of this size instead of the shared AGORA_LLM_CONCURRENCY one. */
+  concurrency?: number;
+  /** Error text when the endpoint is not configured. */
+  missingConfigMessage?: string;
 }
 
 /** Qwen 3 can open with a reasoning block. The household only wants the answer. */
@@ -125,7 +160,11 @@ function toolResultText(content: unknown): string {
 }
 
 /** Messages-API turns to chat-completions turns. One tool message per tool_result block. */
-export function toChatMessages(system: string | undefined, messages: MessageParam[]): ChatMessage[] {
+export function toChatMessages(
+  system: string | undefined,
+  messages: MessageParam[],
+  options: { thoughtSignatures?: boolean } = {},
+): ChatMessage[] {
   const out: ChatMessage[] = [];
   if (system?.trim()) out.push({ role: 'system', content: system.trim() });
   for (const message of messages) {
@@ -139,7 +178,14 @@ export function toChatMessages(system: string | undefined, messages: MessagePara
       for (const block of message.content) {
         if (block.type === 'text') text += block.text;
         if (block.type === 'tool_use') {
-          calls.push({ id: block.id, type: 'function', function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) } });
+          const call: ChatToolCall = { id: block.id, type: 'function', function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) } };
+          if (options.thoughtSignatures) {
+            const kept = (block as unknown as Record<string, unknown>)[THOUGHT_SIGNATURE_KEY];
+            // Gemini validates the first call of a step; parallel calls after it carry none.
+            const signature = typeof kept === 'string' && kept ? kept : calls.length === 0 ? SKIP_THOUGHT_SIGNATURE : '';
+            if (signature) call.extra_content = { google: { thought_signature: signature } };
+          }
+          calls.push(call);
         }
       }
       out.push({ role: 'assistant', content: text || null, ...(calls.length > 0 ? { tool_calls: calls } : {}) });
@@ -184,7 +230,15 @@ export function toMessage(response: ChatResponse, model: string): Message {
   for (const [index, call] of (choice?.message?.tool_calls ?? []).entries()) {
     const name = call.function?.name;
     if (!name) continue;
-    content.push({ type: 'tool_use', id: call.id || `call_${index}`, name, input: parseArguments(call.function?.arguments), caller: { type: 'direct' } });
+    const signature = call.extra_content?.google?.thought_signature;
+    content.push({
+      type: 'tool_use',
+      id: call.id || `call_${index}`,
+      name,
+      input: parseArguments(call.function?.arguments),
+      caller: { type: 'direct' },
+      ...(signature ? { [THOUGHT_SIGNATURE_KEY]: signature } : {}),
+    } as Message['content'][number]);
   }
   const usedTool = content.some((block) => block.type === 'tool_use');
   const stop: Message['stop_reason'] = usedTool ? 'tool_use' : choice?.finish_reason === 'length' ? 'max_tokens' : 'end_turn';
@@ -212,7 +266,8 @@ export function openAiCompatibleReady(): boolean {
 
 export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions = {}): BedrockProvider {
   const baseUrl = (options.baseUrl ?? process.env.AGORA_LLM_BASE_URL ?? '').trim().replace(/\/+$/, '');
-  const apiKey = (options.apiKey ?? process.env.AGORA_LLM_API_KEY ?? '').trim();
+  const keyOption = options.apiKey ?? process.env.AGORA_LLM_API_KEY ?? '';
+  const apiKey = typeof keyOption === 'string' ? keyOption.trim() : keyOption;
   const model = (options.model ?? process.env.AGORA_LLM_MODEL ?? '').trim();
   const fastModel = (options.fastModel ?? process.env.AGORA_LLM_FAST_MODEL ?? '').trim() || model;
   const doFetch: Fetch = options.fetch ?? ((input, init) => fetch(input, init));
@@ -220,13 +275,26 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions 
   const url = baseUrl.endsWith('/chat/completions') ? baseUrl : `${baseUrl}/chat/completions`;
   const usage: RunUsage = { calls: 0, promptTokens: 0, completionTokens: 0, missingUsage: 0 };
   const request = { runId: '-', stage: 'call', agent: '-', attempt: 1 };
+  const slots: SlotPool = options.concurrency && options.concurrency > 0
+    ? { busy: 0, waiting: [], limit: () => options.concurrency as number }
+    : sharedSlots;
+  const signatures = { thoughtSignatures: Boolean(options.thoughtSignatures) };
+
+  /** Model-specific extras: a max_tokens floor and the reasoning effort. */
+  function tuned(chosen: string, maxTokens: number): Record<string, unknown> {
+    const effort = options.reasoningEffort?.(chosen);
+    return {
+      max_tokens: Math.max(maxTokens, options.minOutputTokens ?? 0),
+      ...(effort ? { reasoning_effort: effort } : {}),
+    };
+  }
 
   async function chat(body: Record<string, unknown>, call?: BedrockCallOptions): Promise<ChatResponse> {
     if (!baseUrl || !apiKey || !model) {
-      throw new Error('The server model is not configured. Set AGORA_LLM_BASE_URL, AGORA_LLM_API_KEY and AGORA_LLM_MODEL.');
+      throw new Error(options.missingConfigMessage ?? 'The server model is not configured. Set AGORA_LLM_BASE_URL, AGORA_LLM_API_KEY and AGORA_LLM_MODEL.');
     }
     usage.calls += 1;
-    const release = await takeSlot(call?.signal);
+    const release = await takeSlot(slots, call?.signal);
     try {
       return await send(body, call);
     } finally {
@@ -241,9 +309,11 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions 
     const signal = AbortSignal.any(signals);
     for (let attempt = 1; ; attempt += 1) {
       if (attempt > 1 && retryDelay > 0) await pause(retryDelay * (attempt - 1));
+      // A supplier is asked every attempt: OAuth tokens expire hourly and it caches them itself.
+      const key = typeof apiKey === 'string' ? apiKey : await apiKey();
       const response = await doFetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify(body),
         redirect: 'error',
         signal,
@@ -288,8 +358,8 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions 
       const tools = toChatTools(params.tools);
       const data = await chat({
         model: chosen,
-        max_tokens: params.max_tokens,
-        messages: withNoThink(toChatMessages(params.system, params.messages), chosen),
+        ...tuned(chosen, params.max_tokens),
+        messages: withNoThink(toChatMessages(params.system, params.messages, signatures), chosen),
         ...(tools.length > 0 ? { tools } : {}),
       }, call);
       return toMessage(data, chosen);
@@ -299,8 +369,8 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions 
       const chosen = pickModel(modelName, model);
       const data = await chat({
         model: chosen,
-        max_tokens: COMPLETION_TOKENS,
-        messages: withNoThink(toChatMessages(prepared.system, prepared.messages), chosen),
+        ...tuned(chosen, COMPLETION_TOKENS),
+        messages: withNoThink(toChatMessages(prepared.system, prepared.messages, signatures), chosen),
       });
       const text = stripThinking(data.choices?.[0]?.message?.content ?? '');
       const counted = data.usage

@@ -22,6 +22,7 @@ import { forwardSocietyEvent, startSocietyRun } from './runEngine';
 import { warmAcknowledgements } from './alexaSim/tts';
 import { handleMcpRoutes } from './mcp/http';
 import { handleApiRoutes } from './routes';
+import { seedDemoFamilyOnce } from './taste/demoSeed';
 
 /**
  * Room chat needs only the speakers' endpoints, so one bad connection fails only that speaker.
@@ -200,6 +201,8 @@ export function relayPlugin(): Plugin {
 /** Room relay for the Vite dev server and the production process. */
 export function attachRelay(httpServer: Server): void {
   warmAcknowledgements();
+  // AGORA_DEMO_SEED=1 writes a fictional family into empty memory. Never throws.
+  void seedDemoFamilyOnce();
   let wss: WebSocketServer | null = null;
   const { room, sockets, broadcastAll } = getHub();
       let replyChain = Promise.resolve();

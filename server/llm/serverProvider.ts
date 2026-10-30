@@ -3,17 +3,20 @@ import { createRoutingProvider } from '../routingProvider';
 import type { ServerProvider } from '../society/provider';
 import { createBedrockProvider, type BedrockProvider } from './bedrockProvider';
 import { createOpenAiCompatibleProvider } from './openaiProvider';
+import { createVertexProvider } from './vertexProvider';
 
-export type ServerLlmMode = 'bedrock' | 'openai' | 'key';
+export type ServerLlmMode = 'bedrock' | 'openai' | 'vertex' | 'key';
 
 /**
  * `bedrock` calls Amazon Bedrock. `openai` calls the OpenAI-compatible endpoint in
- * AGORA_LLM_BASE_URL (Featherless, vLLM). Otherwise the saved API key.
+ * AGORA_LLM_BASE_URL (Featherless, vLLM). `vertex` calls Gemini on Vertex AI
+ * (GOOGLE_CLOUD_PROJECT, Application Default Credentials). Otherwise the saved API key.
  */
 export function serverLlmMode(): ServerLlmMode {
   const mode = process.env.AGORA_SERVER_LLM;
   if (mode === 'bedrock') return 'bedrock';
   if (mode === 'openai') return 'openai';
+  if (mode === 'vertex') return 'vertex';
   return 'key';
 }
 
@@ -26,14 +29,19 @@ export function getBedrock(): BedrockProvider {
 }
 
 let compatible: BedrockProvider | null = null;
+let vertex: BedrockProvider | null = null;
 
-/** The model the voice loop and household tools call: Bedrock or the OpenAI-compatible endpoint. */
+/** The model the voice loop and household tools call: Bedrock, the OpenAI-compatible endpoint, or Vertex AI. */
 export function getToolModel(): BedrockProvider | null {
   const mode = serverLlmMode();
   if (mode === 'bedrock') return getBedrock();
   if (mode === 'openai') {
     if (!compatible) compatible = createOpenAiCompatibleProvider();
     return compatible;
+  }
+  if (mode === 'vertex') {
+    if (!vertex) vertex = createVertexProvider();
+    return vertex;
   }
   return null;
 }

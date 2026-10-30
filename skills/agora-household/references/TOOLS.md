@@ -1,6 +1,6 @@
 # AGORA+ MCP tools
 
-Taken from `server/mcp/server.ts`. The server name is `agora-plus`, version `0.1.0`. The negotiated protocol is `2025-11-25` or newer. Alexa's published client sample sends `2025-03-26`. The specification index on 8 Oct 2026 names `2026-07-28`. Eleven tools are always registered. `web_research` is registered only when `FIRECRAWL_API_KEY` or `EXA_API_KEY` is set. Every tool returns `content` (text, the spoken line) and `structuredContent` (the fields below). A failure also sets `isError: true` and `status: "error"`. `daily_briefing` and `list_tasks` also set `_meta.ui.resourceUri` to the household card.
+Taken from `server/mcp/server.ts`. The server name is `agora-plus`, version `0.1.0`. The negotiated protocol is `2025-11-25` or newer. Alexa's published client sample sends `2025-03-26`. The specification index on 8 Oct 2026 names `2026-07-28`. Thirteen tools are always registered. `web_research` is registered only when `FIRECRAWL_API_KEY` or `EXA_API_KEY` is set. Every tool returns `content` (text, the spoken line) and `structuredContent` (the fields below). A failure also sets `isError: true` and `status: "error"`. `daily_briefing` and `list_tasks` also set `_meta.ui.resourceUri` to the household card.
 
 ## Shared output
 
@@ -170,6 +170,28 @@ Input:
 | `question` | string | yes | The question, in everyday words. |
 
 Output: `speech`, `status`, `memories` (`id`, `text`, `tags` only). `who` is omitted because this output schema rejects extra properties. About 4 seconds for an Alexa client, 9 seconds when the client name is `agora-plus-voice`. A missing model or a timeout names the top saved fact and does not use the two-fact recall sentence.
+
+## taste_council
+
+Call when the household asks what to watch, where to eat, what to listen to, what to read, or where to go together. It reads each person's tastes from household memory, asks Qloo (through the local `qloo mcp` server) for options per person, ranks one shared shortlist once per person, and picks the option whose worst rank is best. Keeper removes options that clash with an allergy, diet, or "no X" fact. It does not book or buy anything. It takes 5 to 20 seconds.
+
+Input:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `occasion` | `movie_night` \| `dinner_out` \| `playlist` \| `tv_show` \| `book_club` \| `outing` | yes | What the family is choosing. |
+| `who` | string[] (at most 8) | no | First names from memory. Empty means everyone whose taste is known. |
+| `location` | string (at most 80) | no | City or neighbourhood. Needed for `dinner_out` and `outing`. |
+
+Output: `speech`, `status` (`error` when Qloo is unreachable or not set up), `councilStatus` (`ok`, `degraded`, `error`), `note`, `picks` (`name`, `entityId`, `subtitle`, `worstRank`, `meanRank`, `tags`, `fits` with `who`, `rank`, `of`, `because`), and `vetoes` (`name`, `fact`, `who`).
+
+## taste_profile
+
+Call when someone asks what the household knows about each person's taste. It does not call Qloo and does not change anything.
+
+Input: none.
+
+Output: `speech`, `status`, `members` (`who`, `loves`, `likesTags`, `ageBand`, `constraints`, `factIds`).
 
 ## web_research
 

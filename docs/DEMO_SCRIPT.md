@@ -94,7 +94,7 @@ claude mcp add --transport http agora http://127.0.0.1:3000/mcp --header "Author
 
 **Say.** "Same file. Claude Code is another client. ChatGPT and a live Alexa+ add-on were not part of this take. They can connect to the same server."
 
-Skip the Inspector if the clock is past 2:10. If you have the seconds: the tool list is 11 tools, or 12 when a search key is set. `initialize` may arrive as an SSE `event: message` frame. That is success. The Inspector was not opened during the build ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)).
+Skip the Inspector if the clock is past 2:10. If you have the seconds: the tool list is 13 tools, or 14 when a search key is set. `initialize` may arrive as an SSE `event: message` frame. That is success. The Inspector was not opened during the build ([docs/HACKATHON_CHANGES.md](HACKATHON_CHANGES.md)).
 
 ## 2:10 — How it is built (about 16 seconds)
 

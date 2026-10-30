@@ -24,7 +24,7 @@ AGORA+ is a household brain you run yourself. Household memory is a file on that
 
 The surfaces that were run are the unofficial `/alexa` simulator and the MCP server used from Claude Code with `AGORA_MCP_TOKEN`. MCP clients such as Alexa+ add-ons, Claude, and ChatGPT can connect. ChatGPT was not run against this server. A live Alexa+ add-on was not deployed. The manifest is still a template (`https://<host>/mcp`). The server negotiates protocol 2025-11-25 and newer, over Streamable HTTP. Alexa's published client sample sends 2025-03-26. The specification index on 8 Oct 2026 names 2026-07-28 as current. An Agent Skill tells an agent which tool to use and that a `needs_approval` result waits for a person. `daily_briefing` and `list_tasks` put an MCP Apps card on the tool result for a host that supports it.
 
-Eleven tools are always registered. `web_research` is a twelfth when a search key is set. A fact can name a person. A task can name an owner, a list such as shopping, and a reminder time. The briefing speaks a saved allergy when one is stored. Recall says both facts when they tie. An order, a booking, a payment, or a phone call is refused.
+Thirteen tools are always registered, including the Qloo-backed `taste_council` and `taste_profile`. `web_research` is a fourteenth when a search key is set. A fact can name a person. A task can name an owner, a list such as shopping, and a reminder time. The briefing speaks a saved allergy when one is stored. Recall says both facts when they tie. An order, a booking, a payment, or a phone call is refused.
 
 Behind a plan, four agents can work on Amazon Bedrock through the Claude Messages endpoint: Agora, Scout, Planner, and Keeper. That path runs only when `AGORA_SERVER_LLM=bedrock` and AWS credentials are present. A live Bedrock call was not recorded. Keeper's job is to check the plan against household memory. Amazon Polly speaks only with AWS credentials. A successful Polly synthesize was not recorded. The browser voice speaks when Polly is unavailable. Time to first audio was not measured. The 3D office defaults to that same Household cast while a run is going. The bundled office models are CC BY-NC and are not needed for `/alexa`.
 
@@ -98,7 +98,7 @@ A live Bedrock call and a successful Polly synthesize were not recorded. The bui
 
 **Description:**
 
-The contribution in the hackathon window is the household MCP work: a self-hosted server (11 tools always, `web_research` when a search key is set, 3 resources, 2 prompts, Streamable HTTP, OAuth), an Agent Skill, and the unofficial `/alexa` voice page, on top of the existing office. The server negotiates protocol 2025-11-25 and newer. Household files live on the server you run. Forgetting a fact or starting a plan waits for a person's yes, and every write returns a receipt read back from disk.
+The contribution in the hackathon window is the household MCP work: a self-hosted server (13 tools always, `web_research` when a search key is set, 3 resources, 2 prompts, Streamable HTTP, OAuth), an Agent Skill, and the unofficial `/alexa` voice page, on top of the existing office. The server negotiates protocol 2025-11-25 and newer. Household files live on the server you run. Forgetting a fact or starting a plan waits for a person's yes, and every write returns a receipt read back from disk.
 
 The code license is [LICENSE](../LICENSE) (MIT). Files under `public/models/` are CC BY-NC 4.0 and are not needed to run `/alexa`. See [LICENSE-ASSETS.md](../LICENSE-ASSETS.md).
 

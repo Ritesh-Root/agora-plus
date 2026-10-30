@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CouncilResult } from '../../shared/taste';
 import { Code, House } from 'lucide-react';
 import { groupTasks } from '../interface/householdView';
 import { useAssistant } from '../alexa/useAssistant';
@@ -11,9 +12,12 @@ import { ListCard } from './ListCard';
 import { PasscodeForm } from './PasscodeForm';
 import { PlanSheet } from './PlanSheet';
 import { PlansCard } from './PlansCard';
+import { TasteCard } from './TasteCard';
+import { TasteSheet } from './TasteSheet';
 import { TodayCard } from './TodayCard';
 import { UnderTheHood } from './UnderTheHood';
 import { useHousehold } from './useHousehold';
+import { useTaste } from './useTaste';
 import { cardClass, focusRing, pressable } from './ui';
 
 function useNow(): Date {
@@ -63,6 +67,17 @@ export default function HomePage() {
     void refresh();
   }, [refresh]);
 
+  // Taste members are built from memory, so a new "loves" fact refetches them.
+  const memoryKey = household.snapshot.memory.map((entry) => `${entry.id}:${entry.text}`).join('|');
+  const taste = useTaste({ memoryKey, locked, onLocked });
+  const [council, setCouncil] = useState<CouncilResult | null>(null);
+  const openCouncil = useCallback((result: CouncilResult) => {
+    setCouncil(result);
+    setHood(false);
+    setConnect(false);
+    setPlanId(null);
+  }, []);
+
   const groups = groupTasks(household.snapshot.tasks);
   const shopping = groups.find((group) => group.name === 'Shopping')?.tasks ?? [];
   // Anything with a time today already sits in Today, so the to-do list does not repeat it.
@@ -87,7 +102,7 @@ export default function HomePage() {
             <p className="hidden text-[13px] tabular-nums text-zinc-500 sm:block">{formatHomeStamp(now)}</p>
             <button
               type="button"
-              onClick={() => { setConnect(true); setHood(false); setPlanId(null); }}
+              onClick={() => { setConnect(true); setHood(false); setPlanId(null); setCouncil(null); }}
               className={`rounded-full px-3 py-2 text-sm font-medium text-ink ${focusRing} ${pressable}`}
             >
               Connect
@@ -96,7 +111,7 @@ export default function HomePage() {
               type="button"
               aria-label="Under the hood"
               aria-expanded={hood}
-              onClick={() => { setHood((open) => !open); setConnect(false); setPlanId(null); }}
+              onClick={() => { setHood((open) => !open); setConnect(false); setPlanId(null); setCouncil(null); }}
               className={`inline-flex h-10 items-center gap-2 rounded-full px-2 text-sm font-medium text-ink lg:px-3 ${hood ? 'bg-zinc-100' : ''} ${focusRing} ${pressable}`}
             >
               <Code size={18} strokeWidth={1.75} aria-hidden="true" />
@@ -133,6 +148,16 @@ export default function HomePage() {
             <div className="min-w-0 flex-1 space-y-4">
               {household.error ? <p role="status" className="text-[13px] text-zinc-500">{household.error}</p> : null}
               <ApprovalsCard approvals={household.snapshot.pendingApprovals} hideId={assistant.approval?.approvalId} onDecide={household.decideApproval} />
+              <TasteCard
+                load={taste.load}
+                recent={taste.recent}
+                pending={taste.pending}
+                error={taste.error}
+                now={now.getTime()}
+                onAsk={taste.ask}
+                onOpen={openCouncil}
+                onRetry={() => void taste.refresh()}
+              />
               {/* Two independent columns, so a tall card never leaves a hole beside a short one. */}
               <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
                 <div className="space-y-4">
@@ -201,6 +226,7 @@ export default function HomePage() {
           traceRef={assistant.traceRef}
         />
         <ConnectSheet open={connect} onClose={() => setConnect(false)} />
+        <TasteSheet result={council} onClose={() => setCouncil(null)} onAddTask={(title) => household.addTask(title)} />
         <PlanSheet runId={planId} title={planRun ? briefTitle(planRun.brief) : ''} onClose={() => setPlanId(null)} onLocked={onLocked} />
       </div>
       {locked ? (

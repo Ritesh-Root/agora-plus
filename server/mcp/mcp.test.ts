@@ -12,6 +12,9 @@ import { setDataDir, writeJson } from '../household/store';
 import { defaultServerProvider } from '../llm/serverProvider';
 import { quickResearch } from '../research/research';
 import type { ServerProvider } from '../society/provider';
+import { resetRecentCouncils } from '../taste/council';
+import { entity, fakeQloo } from '../taste/fakeQloo';
+import { setQlooCaller } from '../taste/qlooClient';
 import { handleMcpRoutes } from './http';
 import { resetOauthState } from './oauth';
 
@@ -27,6 +30,8 @@ const TOOLS = [
   'plan_and_run',
   'recall',
   'remember',
+  'taste_council',
+  'taste_profile',
 ];
 
 const ENV_KEYS = [
@@ -224,7 +229,7 @@ describe('MCP endpoint', () => {
     const token = await serviceToken();
     const connected = await connect(token);
     const listed = await connected.listTools();
-    expect(listed.tools).toHaveLength(11);
+    expect(listed.tools).toHaveLength(13);
     await expect(connected.callTool({ name: 'recall', arguments: { query: 'milk' } })).rejects.toThrow(/mcp:tools/);
   });
 
@@ -282,6 +287,37 @@ describe('MCP endpoint', () => {
     expect(dayMeta?.ui?.resourceUri).toBe('ui://daily_briefing/household-card.html');
     expect(dayMeta?.ui?.invoking).toBeTruthy();
     expect(dayMeta?.ui?.invoked).toBeTruthy();
+  });
+
+  it('lists family tastes and runs the Taste Council over MCP', async () => {
+    resetRecentCouncils();
+    setQlooCaller(fakeQloo(() => ({ results: [entity('a', 'Coco'), entity('b', 'Frozen')] })));
+    try {
+      const connected = await connect('dev-token-0123456789abcdef012345');
+      await connected.callTool({ name: 'remember', arguments: { fact: 'Mia loves Encanto' } });
+      await connected.callTool({ name: 'remember', arguments: { fact: 'Dadi loves Raj Kapoor films' } });
+      const profile = await connected.callTool({ name: 'taste_profile', arguments: {} });
+      expect(profile.isError).toBeUndefined();
+      expect(String(structured(profile).speech)).toBe('I know the tastes of 2 people: Dadi and Mia.');
+      expect((structured(profile).members as { who: string }[]).map((member) => member.who)).toEqual(['Dadi', 'Mia']);
+
+      const council = await connected.callTool({ name: 'taste_council', arguments: { occasion: 'movie_night' } });
+      expect(council.isError).toBeUndefined();
+      expect(structured(council).status).toBe('ok');
+      expect(structured(council).councilStatus).toBe('ok');
+      expect(String(structured(council).speech)).toContain('Coco');
+      const picks = structured(council).picks as { name: string; fits: { who: string; rank: number | null }[] }[];
+      expect(picks[0].name).toBe('Coco');
+      expect(picks[0].fits.map((fit) => fit.rank)).toEqual([1, 1]);
+
+      setQlooCaller(fakeQloo(() => ({}), 'unconfigured'));
+      const down = await connected.callTool({ name: 'taste_council', arguments: { occasion: 'playlist' } });
+      expect(down.isError).toBe(true);
+      expect(structured(down).status).toBe('error');
+    } finally {
+      setQlooCaller(null);
+      resetRecentCouncils();
+    }
   });
 
   it('keeps one copy of a fact, names who, and does not call a finished task the first open task', async () => {

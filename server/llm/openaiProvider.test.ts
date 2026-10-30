@@ -74,6 +74,19 @@ describe('OpenAI-compatible provider', () => {
     expect(completion.content).toBe('Pasta on Monday.');
   });
 
+  it('sends max_tokens as given and no Gemini extras on the plain endpoint', async () => {
+    const seen: { url?: string; body?: Record<string, unknown> } = {};
+    const provider = createOpenAiCompatibleProvider({
+      baseUrl: 'https://api.example.test/v1',
+      apiKey: 'test-key',
+      model: 'Qwen/Qwen3-32B',
+      fetch: fakeFetch({ choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] }, seen),
+    });
+    await provider.createMessage({ model: 'x', max_tokens: 100, messages: [{ role: 'user', content: 'Hi' }] });
+    expect(seen.body?.max_tokens).toBe(100);
+    expect(seen.body).not.toHaveProperty('reasoning_effort');
+  });
+
   it('says what to set when the endpoint is not configured', async () => {
     const provider = createOpenAiCompatibleProvider({ baseUrl: '', apiKey: '', model: '' });
     await expect(provider.generateCompletion([{ role: 'user', content: 'Hi' }])).rejects.toThrow(/AGORA_LLM_BASE_URL/);

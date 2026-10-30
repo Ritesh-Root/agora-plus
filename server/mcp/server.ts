@@ -31,6 +31,9 @@ import { memoryMarkdown } from '../household/memoryStore';
 import { toSpeech } from '../household/speech';
 import { researchConfigured } from '../research/research';
 import { getRunRecord, listRecentRuns } from '../runEngine';
+import { runCouncil, TASTE_OCCASIONS } from '../taste/council';
+import { listTasteMembers } from '../taste/profile';
+import { OCCASION_LABEL, type TasteOccasion } from '../../shared/taste';
 import { HOUSEHOLD_CARD_URI, loadHouseholdCardHtml } from './apps/cardHtml';
 
 const INSTRUCTIONS = [
@@ -38,6 +41,7 @@ const INSTRUCTIONS = [
   'Forgetting a memory or starting a plan does not happen immediately. The tool returns needs_approval and an approvalId. Call approve_action with that id and decision approve or reject.',
   'Spoken replies are short. Receipts and lists are in the structured result.',
   'Screens that support it can show a household card for the briefing and the task list. Speak the speech field either way.',
+  'For what the family should watch, eat, listen to, read, or do together, call taste_council; it grounds the choice in Qloo and cites each person\'s rank.',
 ].join(' ');
 
 const receiptSchema = z.object({
@@ -558,6 +562,102 @@ export function buildAgoraMcpServer(ctx: { clientId?: string } = {}): McpServer 
         status: 'ok',
         memories: memoryView(answer.memories),
       });
+    },
+  );
+
+  const tasteMemberSchema = z.object({
+    who: z.string(),
+    loves: z.array(z.string()).describe('Named things the person loves, from memory.'),
+    likesTags: z.array(z.string()).describe('Abstract likes such as thrillers or street food.'),
+    ageBand: z.string().optional(),
+    constraints: z.array(z.string()).describe('Allergy, diet, or avoid facts Keeper checks.'),
+    factIds: z.array(z.string()),
+  });
+
+  server.registerTool(
+    'taste_council',
+    {
+      title: 'Taste Council: pick something the whole family will like',
+      description: [
+        'Call when the household asks what to watch, where to eat, what to listen to, what to read, or where to go together,',
+        'for example "what should we watch tonight", "where should we eat", "make a playlist for the family", "a show for me and Dadi", or "something for the weekend".',
+        'It reads each person\'s tastes from household memory, asks Qloo for options per person, ranks one shared shortlist per person, and picks the option whose worst rank is best, so nobody is left out.',
+        'Keeper removes options that clash with an allergy, diet, or "no horror" fact. Speak the speech field; picks carry per-person ranks.',
+        'Occasions: movie_night (movies), tv_show, playlist (artists), book_club (books), dinner_out (restaurants, pass location), outing (places, pass location).',
+        'It takes 5 to 20 seconds. It does not book or buy anything.',
+      ].join(' '),
+      inputSchema: z.object({
+        occasion: z.enum(TASTE_OCCASIONS as [TasteOccasion, ...TasteOccasion[]]).describe(
+          `What the family is choosing: ${TASTE_OCCASIONS.map((occasion) => `${occasion} (${OCCASION_LABEL[occasion]})`).join(', ')}.`,
+        ),
+        who: z.array(z.string().max(40)).max(8).optional().describe('First names from memory. Leave empty for everyone whose taste is known.'),
+        location: z.string().max(80).optional().describe('City or neighbourhood, needed for dinner_out and outing, for example Bengaluru.'),
+      }),
+      outputSchema: toolOutput({
+        occasion: z.string().optional(),
+        councilStatus: z.enum(['ok', 'degraded', 'error']).optional().describe('degraded when some Qloo calls failed.'),
+        note: z.string().optional(),
+        picks: z.array(z.object({
+          name: z.string(),
+          entityId: z.string().optional(),
+          subtitle: z.string().optional(),
+          worstRank: z.number(),
+          meanRank: z.number(),
+          tags: z.array(z.string()),
+          fits: z.array(z.object({
+            who: z.string(),
+            rank: z.number().nullable(),
+            of: z.number(),
+            because: z.array(z.string()),
+          })),
+        })).optional().describe('Best first, at most five. rank is the 1-based place in that person\'s Qloo ranking of the shortlist.'),
+        vetoes: z.array(z.object({ name: z.string(), fact: z.string(), who: z.string() })).optional(),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ occasion, who, location }) => {
+      const council = await runCouncil({ occasion, ...(who && who.length > 0 ? { who } : {}), ...(location?.trim() ? { location: location.trim() } : {}) });
+      const fields = {
+        speech: council.speech,
+        status: council.status === 'error' ? 'error' as const : 'ok' as const,
+        occasion: council.occasion,
+        councilStatus: council.status,
+        note: council.note,
+        picks: council.picks.map((pick) => ({
+          name: pick.name,
+          ...(pick.entityId ? { entityId: pick.entityId } : {}),
+          ...(pick.subtitle ? { subtitle: pick.subtitle } : {}),
+          worstRank: pick.worstRank,
+          meanRank: pick.meanRank,
+          tags: pick.tags,
+          fits: pick.fits,
+        })),
+        vetoes: council.vetoes,
+      };
+      return council.status === 'error' ? result(fields, { isError: true }) : result(fields);
+    },
+  );
+
+  server.registerTool(
+    'taste_profile',
+    {
+      title: 'Family taste profile',
+      description: 'Call when someone asks what the household knows about each person\'s taste, such as "what does Mia like" or "whose tastes do you know". It lists, per person, the loved titles and artists, abstract likes, age band, and allergy or diet constraints read from household memory. It does not change anything and does not call Qloo.',
+      inputSchema: z.object({}),
+      outputSchema: toolOutput({
+        members: z.array(tasteMemberSchema).optional(),
+      }),
+      annotations: readOnly,
+    },
+    async () => {
+      const members = await listTasteMembers();
+      const names = members.map((member) => member.who);
+      const speech = names.length === 0
+        ? 'I do not know anyone\'s taste yet. Tell me something like Mia loves Encanto.'
+        : names.length === 1
+          ? `I know ${names[0]}'s taste.`
+          : `I know the tastes of ${names.length} people: ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}.`;
+      return result({ speech, status: 'ok', members });
     },
   );
 

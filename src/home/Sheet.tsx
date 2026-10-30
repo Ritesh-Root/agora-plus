@@ -29,7 +29,7 @@ export function Sheet({
 }) {
   const panelRef = useOverlay(open && modal, onClose);
   const frame = wide
-    ? 'max-lg:inset-x-4 max-lg:top-1/2 max-lg:h-auto max-lg:max-h-[85dvh] max-lg:-translate-y-1/2 max-lg:rounded-[1.75rem] lg:inset-y-0 lg:right-0 lg:max-w-[40rem]'
+    ? 'max-lg:inset-x-4 max-lg:w-auto max-lg:top-1/2 max-lg:h-auto max-lg:max-h-[85dvh] max-lg:-translate-y-1/2 max-lg:rounded-[1.75rem] lg:inset-y-0 lg:right-0 lg:max-w-[40rem]'
     : modal
       ? 'inset-y-0 right-0 max-w-[460px]'
       // Below the top bar, so its buttons (including the one that closes this) stay in reach.

@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clearPendingApprovals } from './household/approvals';
 import { setDataDir } from './household/store';
 import { handleApiRoutes } from './routes';
+import { remember } from './household/actions';
+import { resetRecentCouncils } from './taste/council';
+import { entity, fakeQloo } from './taste/fakeQloo';
+import { setQlooCaller } from './taste/qlooClient';
 
 let dir = '';
 const savedPasscode = process.env.AGORA_HOUSEHOLD_PASSCODE;
@@ -261,5 +265,57 @@ describe('household routes', () => {
     expect(rejected.status).toBe(200);
     const deleted = await call('DELETE', `/api/memory/${id}`, authed, undefined, '203.0.113.10');
     expect(deleted.status).toBe(200);
+  });
+});
+
+describe('taste routes', () => {
+  afterEach(() => {
+    setQlooCaller(null);
+    resetRecentCouncils();
+  });
+
+  it('returns the taste snapshot', async () => {
+    resetRecentCouncils();
+    setQlooCaller(fakeQloo(() => ({}), 'unconfigured'));
+    await remember('Mia loves Encanto', [], 'ui');
+    await remember('Mia is 9', [], 'ui');
+    const response = await call('GET', '/api/taste', { host: 'localhost:3000' });
+    expect(response.status).toBe(200);
+    const body = JSON.parse(response.body) as { members: { who: string; loves: string[]; ageBand?: string }[]; qlooReady: boolean; recent: unknown[] };
+    expect(body.qlooReady).toBe(false);
+    expect(body.recent).toEqual([]);
+    expect(body.members).toEqual([expect.objectContaining({ who: 'Mia', loves: ['Encanto'], ageBand: '0-17' })]);
+    expect((await call('POST', '/api/taste', { host: 'localhost:3000' }, {})).status).toBe(405);
+  });
+
+  it('runs a council and validates the body', async () => {
+    resetRecentCouncils();
+    setQlooCaller(fakeQloo(() => ({ results: [entity('a', 'Coco')] })));
+    await remember('Mia loves Encanto', [], 'ui');
+    const headers = { host: 'localhost:3000', 'content-type': 'application/json' };
+    const ok = await call('POST', '/api/taste/council', headers, { occasion: 'movie_night', who: ['Mia'] });
+    expect(ok.status).toBe(200);
+    const result = JSON.parse(ok.body) as { status: string; picks: { name: string }[]; calls: unknown[] };
+    expect(result.status).toBe('ok');
+    expect(result.picks[0].name).toBe('Coco');
+    expect(result.calls.length).toBe(2);
+    const snapshot = JSON.parse((await call('GET', '/api/taste', { host: 'localhost:3000' })).body) as { recent: unknown[] };
+    expect(snapshot.recent).toHaveLength(1);
+
+    expect((await call('POST', '/api/taste/council', headers, { occasion: 'party' })).status).toBe(400);
+    expect((await call('POST', '/api/taste/council', headers, { occasion: 'playlist', who: 'Mia' })).status).toBe(400);
+    expect((await call('POST', '/api/taste/council', headers, { occasion: 'playlist', who: Array.from({ length: 9 }, (_, i) => `P${i}`) })).status).toBe(400);
+    expect((await call('POST', '/api/taste/council', headers, { occasion: 'outing', location: 'x'.repeat(81) })).status).toBe(400);
+    expect((await call('GET', '/api/taste/council', { host: 'localhost:3000' })).status).toBe(405);
+  });
+
+  it('applies the household guards', async () => {
+    const offLoopback = await call('GET', '/api/taste', { host: 'example.com' }, undefined, '10.0.0.5');
+    expect(offLoopback.status).toBe(403);
+    const crossSite = await call('POST', '/api/taste/council', { host: 'localhost:3000', origin: 'https://evil.example' }, { occasion: 'playlist' });
+    expect(crossSite.status).toBe(403);
+    process.env.AGORA_HOUSEHOLD_PASSCODE = 'correct horse battery';
+    const locked = await call('GET', '/api/taste', { host: 'localhost:3000' });
+    expect(locked.status).toBe(401);
   });
 });
