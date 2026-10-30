@@ -1,10 +1,19 @@
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import path from 'path';
+import type { Client } from '@modelcontextprotocol/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fakeQloo } from './fakeQloo';
-import { callQloo, normalizeEnvelope, qlooInFlight, qlooReady, setQlooCaller } from './qlooClient';
+import { callQloo, createStdioQlooCaller, normalizeEnvelope, qlooChildEnv, qlooInFlight, qlooReady, setQlooCaller } from './qlooClient';
 
-afterEach(() => {
+let scratch = '';
+
+afterEach(async () => {
   setQlooCaller(null);
   delete process.env.QLOO_API_KEY;
+  delete process.env.QLOO_BIN;
+  if (scratch) await rm(scratch, { recursive: true, force: true });
+  scratch = '';
 });
 
 describe('normalizeEnvelope', () => {
@@ -80,4 +89,139 @@ describe('callQloo', () => {
     setQlooCaller(fakeQloo(() => ({}), 'unconfigured'));
     await expect(qlooReady()).resolves.toBe(false);
   });
+});
+
+describe('callQloo deadline', () => {
+  it('skips the call once the deadline has passed, without touching Qloo', async () => {
+    const fake = fakeQloo(() => ({ results: [{ name: 'Coco' }] }));
+    setQlooCaller(fake);
+    const late = await callQloo('qloo_recommend', { n: 1 }, 'Mia', Date.now() - 1);
+    expect(late.skipped).toBe(true);
+    expect(late.envelope.status).toBe('error');
+    expect(fake.calls).toHaveLength(0);
+    expect(qlooInFlight()).toBe(0);
+    const inTime = await callQloo('qloo_recommend', { n: 1 }, 'Mia', Date.now() + 60_000);
+    expect(inTime.skipped).toBeUndefined();
+    expect(inTime.envelope.status).toBe('ok');
+  });
+});
+
+describe('qlooChildEnv', () => {
+  it('passes the Qloo settings and the basics, and nothing else of ours', () => {
+    const env = qlooChildEnv({
+      PATH: '/usr/bin',
+      HOME: '/home/x',
+      QLOO_API_KEY: 'k',
+      QLOO_TRUSTED_BASE_URL: 'https://trusted.example',
+      QLOO_HOME: '/tmp/qloo',
+      TASTE_RESOLVER_URL: 'https://resolver.example',
+      GEMINI_API_KEY: 'gemini-secret',
+      AWS_SECRET_ACCESS_KEY: 'aws-secret',
+      AGORA_PASSCODE: 'pass',
+    });
+    expect(env).toMatchObject({
+      QLOO_API_KEY: 'k',
+      QLOO_TRUSTED_BASE_URL: 'https://trusted.example',
+      QLOO_HOME: '/tmp/qloo',
+      TASTE_RESOLVER_URL: 'https://resolver.example',
+    });
+    expect(env).not.toHaveProperty('GEMINI_API_KEY');
+    expect(env).not.toHaveProperty('AWS_SECRET_ACCESS_KEY');
+    expect(env).not.toHaveProperty('AGORA_PASSCODE');
+  });
+});
+
+// ---- the real stdio caller, against tiny stand-in `qloo mcp` scripts ----
+
+/** Each script appends its pid to pids.txt when it starts. */
+const HANGS = `#!/usr/bin/env node
+require('fs').appendFileSync(process.env.QLOO_HOME + '/pids.txt', process.pid + '\\n');
+setInterval(() => {}, 1000);
+`;
+
+/** A minimal MCP server over newline-delimited JSON-RPC. */
+const ANSWERS = `#!/usr/bin/env node
+require('fs').appendFileSync(process.env.QLOO_HOME + '/pids.txt', process.pid + '\\n');
+let buffer = '';
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf('\\n')) >= 0) {
+    const line = buffer.slice(0, index);
+    buffer = buffer.slice(index + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (message.id === undefined) continue;
+    if (message.method === 'initialize') {
+      send({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fake-qloo', version: '0' } } });
+    } else if (message.method === 'tools/call') {
+      send({ jsonrpc: '2.0', id: message.id, result: { content: [], structuredContent: { status: 'ok', results: [], adapter: { ready: true } } } });
+    } else {
+      send({ jsonrpc: '2.0', id: message.id, result: {} });
+    }
+  }
+});
+process.stdin.on('end', () => process.exit(0));
+`;
+
+async function fakeBin(source: string): Promise<void> {
+  scratch = await mkdtemp(path.join(tmpdir(), 'agora-qloo-bin-'));
+  const bin = path.join(scratch, 'qloo');
+  await writeFile(bin, source);
+  await chmod(bin, 0o755);
+  process.env.QLOO_BIN = bin;
+  process.env.QLOO_HOME = scratch;
+}
+
+async function pids(): Promise<number[]> {
+  const text = await readFile(path.join(scratch, 'pids.txt'), 'utf8').catch(() => '');
+  return text.split('\n').filter(Boolean).map(Number);
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe('stdio caller', () => {
+  afterEach(() => {
+    delete process.env.QLOO_HOME;
+  });
+
+  it('closes a child that never answers, on each attempt', async () => {
+    await fakeBin(HANGS);
+    setQlooCaller(createStdioQlooCaller({ connectTimeoutMs: 300 }));
+    const { envelope } = await callQloo('qloo_recommend', { target_type: 'movie' });
+    expect(envelope.status).toBe('error');
+    expect(envelope.summary).toMatch(/timed out/);
+    const started = await pids();
+    expect(started).toHaveLength(2);
+    expect(started.filter(alive)).toEqual([]);
+  }, 20_000);
+
+  it('only closes the shared client when the failed call used it', async () => {
+    await fakeBin(ANSWERS);
+    const caller = createStdioQlooCaller({ connectTimeoutMs: 5_000 });
+    setQlooCaller(caller);
+    await expect(qlooReady()).resolves.toBe(true);
+    const [first] = await pids();
+    expect(alive(first)).toBe(true);
+
+    caller.reset({} as Client);
+    await caller.callTool('qloo_capabilities', {});
+    expect(await pids()).toEqual([first]);
+
+    caller.reset();
+    await caller.callTool('qloo_capabilities', {});
+    const after = await pids();
+    expect(after).toHaveLength(2);
+    setQlooCaller(null);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(after.filter(alive)).toEqual([]);
+  }, 20_000);
 });

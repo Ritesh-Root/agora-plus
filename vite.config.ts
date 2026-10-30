@@ -13,7 +13,7 @@ export default defineConfig(({mode}) => {
     'FIRECRAWL_API_KEY', 'ALEXA_SIM_MODEL', 'ALEXA_SIM_FAST_PATH',
     'DEMO_HOST_SECRET', 'SOCIETY_REPLAY', 'BENCH_REPLAY', 'DISABLE_HMR',
   ];
-  const serverPrefixes = ['AGORA_', 'AWS_', 'BEDROCK_', 'POLLY_', 'QLOO_'];
+  const serverPrefixes = ['AGORA_', 'AWS_', 'BEDROCK_', 'POLLY_', 'QLOO_', 'VERTEX_', 'GOOGLE_CLOUD_PROJECT', 'GCLOUD_PROJECT'];
   for (const [name, value] of Object.entries(env)) {
     const wanted = serverNames.includes(name) || serverPrefixes.some((prefix) => name.startsWith(prefix));
     if (wanted && value && !process.env[name]) process.env[name] = value;

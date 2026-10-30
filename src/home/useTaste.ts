@@ -74,11 +74,16 @@ export function useTaste({ memoryKey, locked, onLocked }: { memoryKey: string; l
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
+  /** Numbers each refresh; only the newest one may apply its answer. */
+  const refreshSeq = useRef(0);
   const lockedRef = useRef(onLocked);
   lockedRef.current = onLocked;
 
   const refresh = useCallback(async () => {
+    refreshSeq.current += 1;
+    const seq = refreshSeq.current;
     const next = await loadTaste();
+    if (seq !== refreshSeq.current) return;
     if (next.kind === 'locked') lockedRef.current();
     setLoad((previous) => (next.kind === 'failed' && previous?.kind === 'ready' ? previous : next));
     if (next.kind === 'ready') {

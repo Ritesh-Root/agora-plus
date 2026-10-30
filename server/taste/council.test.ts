@@ -1,13 +1,14 @@
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MemoryEntry } from '../household/memoryStore';
-import { setDataDir } from '../household/store';
+import { loadJsonFile, setDataDir } from '../household/store';
 import {
   candidateFrom,
   conflictWords,
   councilSpeech,
+  keeperCheck,
   listRecentCouncils,
   resetRecentCouncils,
   roundRobin,
@@ -18,6 +19,12 @@ import {
 import { entity, fakeQloo } from './fakeQloo';
 import { profileFromEntries } from './profile';
 import { setQlooCaller } from './qlooClient';
+
+// Pass-through, so one test can slow the recent-results load down.
+vi.mock('../household/store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../household/store')>();
+  return { ...actual, loadJsonFile: vi.fn(actual.loadJsonFile) };
+});
 
 let dir = '';
 let counter = 0;
@@ -252,6 +259,56 @@ describe('runCouncil', () => {
     const recent = await listRecentCouncils();
     expect(recent.map((item) => item.occasion)).toEqual(['tv_show', 'movie_night']);
   });
+
+  it('keeps both of two councils that finish at the same time', async () => {
+    setQlooCaller(family());
+    // Both councils reach the recent list while its file is still loading.
+    const actual = (await vi.importActual<typeof import('../household/store')>('../household/store')).loadJsonFile;
+    vi.mocked(loadJsonFile).mockImplementation(async (...args) => {
+      const value = await actual(...args);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return value;
+    });
+    try {
+      await Promise.all([
+        runCouncil({ occasion: 'movie_night' }, { profile: FAMILY }),
+        runCouncil({ occasion: 'tv_show' }, { profile: FAMILY }),
+      ]);
+    } finally {
+      vi.mocked(loadJsonFile).mockImplementation(actual);
+    }
+    expect((await listRecentCouncils()).map((item) => item.occasion).sort()).toEqual(['movie_night', 'tv_show']);
+    resetRecentCouncils();
+    expect((await listRecentCouncils()).map((item) => item.occasion).sort()).toEqual(['movie_night', 'tv_show']);
+  });
+
+  it('stops calling Qloo past its deadline and answers with what it has, degraded', async () => {
+    const slow = family();
+    const handle = slow.callTool.bind(slow);
+    slow.callTool = async (tool, args) => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return handle(tool, args);
+    };
+    setQlooCaller(slow);
+    // Two slots: two recommends finish at ~250 ms, past the 150 ms deadline, so the third
+    // recommend and every rank are skipped.
+    const result = await runCouncil({ occasion: 'movie_night' }, { profile: FAMILY, deadlineMs: 150 });
+    expect(result.status).toBe('degraded');
+    expect(result.note).toMatch(/ran out of time/);
+    expect(result.picks.length).toBeGreaterThan(0);
+    expect(slow.calls.filter((call) => call.tool === 'qloo_recommend')).toHaveLength(2);
+    expect(slow.calls.filter((call) => call.tool === 'qloo_rank')).toHaveLength(0);
+    expect(result.calls).toHaveLength(2);
+  });
+
+  it('is an error that says so when the deadline passes before any answer', async () => {
+    const fake = family();
+    setQlooCaller(fake);
+    const result = await runCouncil({ occasion: 'movie_night' }, { profile: FAMILY, deadlineMs: 0 });
+    expect(result.status).toBe('error');
+    expect(result.note).toMatch(/too slow/);
+    expect(fake.calls).toHaveLength(0);
+  });
 });
 
 describe('maximin helpers', () => {
@@ -296,6 +353,37 @@ describe('maximin helpers', () => {
     expect(conflictWords('vegetarian', 'place')).toContain('steakhouse');
     expect(conflictWords('peanuts', 'place')).toContain('satay');
     expect(conflictWords('no horror', 'movie')).toEqual(['horror']);
+  });
+
+  it('does not turn a diet with no place words into a word to veto', () => {
+    for (const diet of ['kosher', 'coeliac', 'diabetic', 'lactose intolerant']) expect(conflictWords(diet, 'place')).toEqual([]);
+    const deli = scoreShortlist([candidateFrom(entity('k', 'Kosher Deli'))!], []);
+    const profile = profileFromEntries(facts('Leah keeps kosher'));
+    expect(profile.members[0].constraints).toEqual(['kosher']);
+    const { kept, vetoes } = keeperCheck(deli, profile.members, 'place', profile.constraintFacts);
+    expect(vetoes).toEqual([]);
+    expect(kept.map((item) => item.name)).toEqual(['Kosher Deli']);
+  });
+
+  it('makes "no X" singular without cutting the word', () => {
+    expect(conflictWords('no zombies', 'movie')).toEqual(['zombie']);
+    expect(conflictWords('no horses', 'movie')).toEqual(['horse']);
+    expect(conflictWords('no musicals', 'movie')).toEqual(['musical']);
+    expect(conflictWords('no peaches', 'place')).toEqual(['peach']);
+    expect(conflictWords('no boxes', 'movie')).toEqual(['box']);
+    expect(conflictWords('no glasses', 'movie')).toEqual(['glass']);
+    const films = scoreShortlist(['Zombieland', 'The Zombie Diaries', 'Up'].map((name, index) => candidateFrom(entity(String(index), name))!), []);
+    const member = profileFromEntries(facts('Arjun hates zombies')).members;
+    expect(keeperCheck(films, member, 'movie', new Map()).vetoes.map((veto) => veto.name)).toEqual(['The Zombie Diaries']);
+  });
+
+  it('maps nut allergies to nuts, but not coconut, nutmeg or butternut', () => {
+    expect(conflictWords('tree nuts', 'place')).toContain('cashew');
+    expect(conflictWords('nuts', 'place')).toContain('almond');
+    expect(conflictWords('peanuts', 'place')).toContain('satay');
+    expect(conflictWords('coconut', 'place')).toEqual(['coconut']);
+    expect(conflictWords('nutmeg', 'place')).toEqual(['nutmeg']);
+    expect(conflictWords('butternut squash', 'place')).toEqual(['butternut squash']);
   });
 
   it('selects members with a taste when nobody is named', () => {

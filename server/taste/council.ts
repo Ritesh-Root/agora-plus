@@ -30,6 +30,11 @@ const RECOMMEND_LIMIT = 8;
 /** qloo_rank accepts at most 10 options. */
 const SHORTLIST_MAX = 10;
 const PICKS_MAX = 5;
+/**
+ * Past this, queued Qloo calls are skipped and the council answers with what it has. A call that
+ * started just before can still take its own 20 s, which keeps the whole under the UI's 60 s.
+ */
+const COUNCIL_DEADLINE_MS = 40_000;
 
 const OCCASION_PHRASE: Record<TasteOccasion, string> = {
   movie_night: 'movie night',
@@ -228,8 +233,14 @@ const ALLERGEN_WORDS: Record<string, string[]> = {
   egg: ['egg', 'eggs'],
 };
 
+/** Diets the profile parser knows that have no reliable place words: Keeper does not guess. */
+const DIETS_WITHOUT_WORDS: ReadonlySet<string> = new Set(['kosher', 'coeliac', 'diabetic', 'lactose intolerant']);
+
+/** "boxes" -> "box", "glasses" -> "glass", "zombies" -> "zombie", "horses" -> "horse". */
 function singular(word: string): string {
-  return word.replace(/(?:es|s)$/i, '');
+  if (/(?:x|z|ch|sh|ss)es$/i.test(word)) return word.slice(0, -2);
+  if (/[^s]s$/i.test(word)) return word.slice(0, -1);
+  return word;
 }
 
 function escapeRegex(text: string): string {
@@ -247,7 +258,9 @@ export function conflictWords(constraint: string, target: string): string[] {
   if (avoid) return [singular(avoid[1].trim())].filter((word) => word.length > 1);
   if (target !== 'place') return [];
   if (DIET_WORDS[value]) return DIET_WORDS[value];
-  const key = Object.keys(ALLERGEN_WORDS).find((name) => singular(value) === name || value.startsWith(`${name} `) || singular(value).endsWith(name));
+  if (DIETS_WITHOUT_WORDS.has(value)) return [];
+  // Whole words only: "tree nuts" is a nut allergy, "coconut" and "nutmeg" are not.
+  const key = Object.keys(ALLERGEN_WORDS).find((name) => singular(value) === name || value.startsWith(`${name} `) || singular(value).endsWith(` ${name}`));
   if (key) return ALLERGEN_WORDS[key];
   return [singular(value)].filter((word) => word.length > 2);
 }
@@ -333,18 +346,22 @@ function isResultList(value: unknown): boolean {
 
 export async function listRecentCouncils(): Promise<CouncilResult[]> {
   if (recent) return recent.slice();
+  let loaded: CouncilResult[] = [];
   try {
-    const loaded = await loadJsonFile(RECENT_FILE, isResultList);
-    recent = Array.isArray(loaded) ? (loaded as CouncilResult[]).slice(0, RECENT_MAX) : [];
+    const value = await loadJsonFile(RECENT_FILE, isResultList);
+    if (Array.isArray(value)) loaded = (value as CouncilResult[]).slice(0, RECENT_MAX);
   } catch {
-    recent = [];
+    loaded = [];
   }
+  // A council that finished while the file was loading has already set the list; keep it.
+  recent ??= loaded;
   return recent.slice();
 }
 
 async function remember(result: CouncilResult): Promise<void> {
-  const current = await listRecentCouncils();
-  recent = [result, ...current].slice(0, RECENT_MAX);
+  await listRecentCouncils();
+  // Rebuild from the live list, not a copy from before the await, so concurrent councils all stay.
+  recent = [result, ...(recent ?? [])].slice(0, RECENT_MAX);
   try {
     await writeJson(RECENT_FILE, recent);
   } catch (error) {
@@ -393,13 +410,24 @@ function repairArgs(args: Record<string, unknown>, envelope: QlooEnvelope): Reco
   return changed ? next : null;
 }
 
+/** The council's time budget. `outOfTime` is set when a call was skipped for it. */
+interface Budget {
+  deadline: number;
+  outOfTime: boolean;
+}
+
 async function callWithRepair(
   tool: string,
   args: Record<string, unknown>,
   who: string,
   calls: QlooCallRecord[],
+  budget: Budget,
 ): Promise<{ envelope: QlooEnvelope; args: Record<string, unknown> }> {
-  const first = await callQloo(tool, args, who);
+  const first = await callQloo(tool, args, who, budget.deadline);
+  if (first.skipped) {
+    budget.outOfTime = true;
+    return { envelope: first.envelope, args };
+  }
   calls.push(first.record);
   if (first.envelope.status !== 'needs_input') return { envelope: first.envelope, args };
   const repaired = repairArgs(args, first.envelope);
@@ -407,7 +435,11 @@ async function callWithRepair(
   if (tool === 'qloo_recommend' && !repaired.signals && !repaired.signal_tags && !repaired.demographic && !repaired.signal_location) {
     return { envelope: first.envelope, args };
   }
-  const second = await callQloo(tool, repaired, who);
+  const second = await callQloo(tool, repaired, who, budget.deadline);
+  if (second.skipped) {
+    budget.outOfTime = true;
+    return { envelope: second.envelope, args: repaired };
+  }
   calls.push(second.record);
   return { envelope: second.envelope, args: repaired };
 }
@@ -479,7 +511,12 @@ export function selectMembers(all: TasteMember[], who: string[] | undefined): { 
   return { members, missing: asked.filter((name) => !found.has(name.toLowerCase())) };
 }
 
-export async function runCouncil(req: CouncilRequest, deps: { profile?: TasteProfile } = {}): Promise<CouncilResult> {
+const OUT_OF_TIME_NOTE = 'The council ran out of time, so some Qloo calls were skipped.';
+
+export async function runCouncil(
+  req: CouncilRequest,
+  deps: { profile?: TasteProfile; deadlineMs?: number } = {},
+): Promise<CouncilResult> {
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
   const occasion = req.occasion;
@@ -510,6 +547,7 @@ export async function runCouncil(req: CouncilRequest, deps: { profile?: TastePro
   }
 
   const calls: QlooCallRecord[] = [];
+  const budget: Budget = { deadline: started + (deps.deadlineMs ?? COUNCIL_DEADLINE_MS), outOfTime: false };
   /** Calls whose final answer (after one repair) was not usable. A repaired needs_input is not a failure. */
   let failures = 0;
 
@@ -523,7 +561,7 @@ export async function runCouncil(req: CouncilRequest, deps: { profile?: TastePro
     }
     if (target === 'place' && location) args.filter_location = location;
     if (!args.signals && !args.signal_tags && !args.signal_location) return { member, list: [] as Candidate[], ok: false };
-    const { envelope } = await callWithRepair('qloo_recommend', args, member.who, calls);
+    const { envelope } = await callWithRepair('qloo_recommend', args, member.who, calls, budget);
     if (!usable(envelope.status)) {
       failures += 1;
       return { member, list: [] as Candidate[], ok: false };
@@ -534,7 +572,10 @@ export async function runCouncil(req: CouncilRequest, deps: { profile?: TastePro
 
   const anyRecommend = perMember.some((entry) => entry.ok);
   if (!anyRecommend) {
-    return errorResult(base, started, 'Qloo did not answer for anyone this time, so I have no picks. Try again in a minute.', calls);
+    const note = budget.outOfTime
+      ? 'Qloo was too slow to answer this time, so I have no picks. Try again in a minute, or with fewer people.'
+      : 'Qloo did not answer for anyone this time, so I have no picks. Try again in a minute.';
+    return errorResult(base, started, note, calls);
   }
 
   const shortlist = roundRobin(perMember.map((entry) => entry.list));
@@ -546,7 +587,7 @@ export async function runCouncil(req: CouncilRequest, deps: { profile?: TastePro
       speech: councilSpeech(occasion, [], []),
       calls,
       status: failures > 0 ? 'degraded' : 'ok',
-      note: 'Qloo returned no candidates for these tastes.',
+      note: budget.outOfTime ? OUT_OF_TIME_NOTE : 'Qloo returned no candidates for these tastes.',
       ms: Date.now() - started,
     };
     await remember(result);
@@ -565,7 +606,7 @@ export async function runCouncil(req: CouncilRequest, deps: { profile?: TastePro
     const because = cleanList(member.loves, MAX_SIGNALS);
     const args: Record<string, unknown> = { options, option_type: target, ...sharedSignals(member, location, target) };
     if (!args.signals && !args.signal_location) return { who: member.who, because, order: null, skipped: true };
-    const { envelope } = await callWithRepair('qloo_rank', args, member.who, calls);
+    const { envelope } = await callWithRepair('qloo_rank', args, member.who, calls, budget);
     if (!usable(envelope.status)) failures += 1;
     if (!usable(envelope.status) || envelope.results.length === 0) return { who: member.who, because, order: null };
     const order: string[] = [];
@@ -596,8 +637,9 @@ export async function runCouncil(req: CouncilRequest, deps: { profile?: TastePro
 
   const failed = failures > 0 || !anyRanking || rankings.some((ranking) => !ranking.order && !ranking.skipped);
   const notes: string[] = [];
+  if (budget.outOfTime) notes.push(OUT_OF_TIME_NOTE);
   if (!anyRanking) notes.push('Qloo did not rank the shortlist, so picks follow each person\'s recommendations.');
-  else if (failed) notes.push('Some Qloo calls did not answer, so a few ranks are missing.');
+  else if (failed && !budget.outOfTime) notes.push('Some Qloo calls did not answer, so a few ranks are missing.');
   const skipped = rankings.filter((ranking) => ranking.skipped).map((ranking) => ranking.who);
   if (skipped.length > 0) notes.push(`${listNames(skipped)} named no favourite title or artist, so Qloo could not rank for them.`);
   if (missing.length > 0) notes.push(`No taste facts for ${listNames(missing)}.`);

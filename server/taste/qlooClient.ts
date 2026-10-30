@@ -1,11 +1,11 @@
 import { Client } from '@modelcontextprotocol/client';
-import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import type { QlooCallRecord } from '../../shared/taste';
 
 /**
  * One process-wide MCP client for the official Qloo MCP server (`qloo mcp` over stdio).
- * The child reads QLOO_API_KEY / QLOO_BASE_URL from our environment; the key never leaves
- * the child and is never logged or returned here.
+ * The child gets the SDK's minimal environment plus the Qloo settings (qlooChildEnv), never the
+ * rest of ours. The key never leaves the child and is never logged or returned here.
  *
  * Every call goes through a small LRU cache (30 min) and a two-slot semaphore, so a council
  * of four people cannot burst the Qloo event quota.
@@ -50,6 +50,8 @@ export interface QlooCaller {
 
 const STATUSES: ReadonlySet<string> = new Set(['ok', 'empty', 'needs_input', 'partial', 'degraded', 'error']);
 const CALL_TIMEOUT_MS = 20_000;
+const CONNECT_TIMEOUT_MS = 8_000;
+/** For the qloo_capabilities call itself, after the child is up (the connect has its own timeout). */
 const READY_TIMEOUT_MS = 8_000;
 const CACHE_TTL_MS = 30 * 60_000;
 const CACHE_MAX = 200;
@@ -67,10 +69,17 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-function stringEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === 'string') env[key] = value;
+/**
+ * What `qloo mcp` reads: its QLOO_* settings (QLOO_API_KEY, QLOO_BASE_URL, QLOO_TRUSTED_BASE_URL,
+ * QLOO_HOME, QLOO_TRUSTED_TASTE_RESOLVER_URL, ...) and the taste resolver's. Everything else of
+ * ours (other API keys, cloud credentials) stays out of the child.
+ */
+const CHILD_ENV = new Set(['TASTE_RESOLVER_URL', 'TASTE_RESOLVER_API_KEY', 'NODE_EXTRA_CA_CERTS', 'TMPDIR', 'LANG']);
+
+export function qlooChildEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const env = getDefaultEnvironment();
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'string' && (key.startsWith('QLOO_') || CHILD_ENV.has(key))) env[key] = value;
   }
   return env;
 }
@@ -80,17 +89,26 @@ class StdioQlooCaller implements QlooCaller {
   private client: Client | null = null;
   private connecting: Promise<Client> | null = null;
 
+  constructor(private readonly connectTimeoutMs = CONNECT_TIMEOUT_MS) {}
+
   private connect(): Promise<Client> {
     if (this.client) return Promise.resolve(this.client);
     if (this.connecting) return this.connecting;
     const command = process.env.QLOO_BIN?.trim() || 'qloo';
     const attempt = (async () => {
-      const transport = new StdioClientTransport({ command, args: ['mcp'], env: stringEnv(), stderr: 'ignore' });
+      const transport = new StdioClientTransport({ command, args: ['mcp'], env: qlooChildEnv(), stderr: 'ignore' });
       const client = new Client({ name: 'agora-plus-taste', version: '0.1.0' });
       transport.onclose = () => {
         if (this.client === client) this.client = null;
       };
-      await withTimeout(client.connect(transport), READY_TIMEOUT_MS, 'Starting qloo mcp');
+      try {
+        await withTimeout(client.connect(transport), this.connectTimeoutMs, 'Starting qloo mcp');
+      } catch (error) {
+        // A child that started but never answered would otherwise be orphaned.
+        await client.close().catch(() => undefined);
+        await transport.close().catch(() => undefined);
+        throw error;
+      }
       this.client = client;
       return client;
     })();
@@ -100,33 +118,42 @@ class StdioQlooCaller implements QlooCaller {
     });
   }
 
-  reset(): void {
+  /**
+   * Close the shared client. With `expected`, only when it is still the shared one, so a call
+   * that failed on an old child does not kill a newer child other calls are using.
+   */
+  reset(expected?: Client): void {
     const client = this.client;
+    if (!client || (expected && client !== expected)) return;
     this.client = null;
-    if (client) void client.close().catch(() => undefined);
+    void client.close().catch(() => undefined);
   }
 
-  async callTool(tool: string, args: Record<string, unknown>): Promise<QlooRawResult> {
+  callTool(tool: string, args: Record<string, unknown>): Promise<QlooRawResult> {
+    return this.call(tool, args, CALL_TIMEOUT_MS);
+  }
+
+  private async call(tool: string, args: Record<string, unknown>, timeoutMs: number): Promise<QlooRawResult> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let client: Client;
       try {
         client = await this.connect();
       } catch (error) {
-        this.reset();
+        // connect() already closed the child it started.
         if (attempt === 0) continue;
         throw error;
       }
       try {
-        const result = await withTimeout(client.callTool({ name: tool, arguments: args }), CALL_TIMEOUT_MS, tool);
+        const result = await withTimeout(client.callTool({ name: tool, arguments: args }), timeoutMs, tool);
         return result as QlooRawResult;
       } catch (error) {
         const message = error instanceof Error ? error.message : '';
         const closed = this.client !== client || /closed|not connected|EPIPE|ECONNRESET/i.test(message);
         if (closed && attempt === 0) {
-          this.reset();
+          this.reset(client);
           continue;
         }
-        if (/timed out/.test(message)) this.reset();
+        if (/timed out/.test(message)) this.reset(client);
         throw error;
       }
     }
@@ -135,17 +162,23 @@ class StdioQlooCaller implements QlooCaller {
 
   async readiness(): Promise<QlooReadiness> {
     try {
-      const raw = await withTimeout(this.callTool('qloo_capabilities', {}), READY_TIMEOUT_MS, 'qloo_capabilities');
+      // Not wrapped in another timeout: a slow but successful start must not read as unreachable.
+      // The connect and the call each have their own.
+      const raw = await this.call('qloo_capabilities', {}, READY_TIMEOUT_MS);
       const adapter = asRecord(asRecord(raw.structuredContent)?.adapter);
       if (adapter?.ready === true) return 'ready';
       // The child reads the credential at start. Drop it so a later `qloo setup` takes effect.
       this.reset();
       return 'unconfigured';
     } catch {
-      this.reset();
       return 'unreachable';
     }
   }
+}
+
+/** Tests: the real stdio caller with a shorter start timeout. */
+export function createStdioQlooCaller(options: { connectTimeoutMs?: number } = {}): QlooCaller & { reset(expected?: Client): void } {
+  return new StdioQlooCaller(options.connectTimeoutMs);
 }
 
 let caller: QlooCaller | null = null;
@@ -316,20 +349,29 @@ function safeMessage(error: unknown): string {
 /**
  * Call one Qloo MCP tool. Cached for 30 minutes per tool+args (ok and empty results only),
  * at most two in flight, 20 s each. Errors come back as an error envelope, never a throw.
+ * With a `deadline` (epoch ms) that has passed by the time a slot frees, no call is made:
+ * the envelope is an error and `skipped` is true.
  */
 export async function callQloo(
   tool: string,
   args: Record<string, unknown>,
   forWho?: string,
-): Promise<{ envelope: QlooEnvelope; record: QlooCallRecord }> {
+  deadline?: number,
+): Promise<{ envelope: QlooEnvelope; record: QlooCallRecord; skipped?: true }> {
   const key = `${tool}:${stableStringify(args)}`;
   const started = Date.now();
   let envelope = cacheGet(key);
+  let skipped = false;
   if (!envelope) {
     await acquire();
     try {
-      const raw = await currentCaller().callTool(tool, args);
-      envelope = normalizeEnvelope(raw);
+      if (deadline !== undefined && Date.now() >= deadline) {
+        skipped = true;
+        envelope = { status: 'error', summary: 'Skipped: out of time.', results: [], result_count: 0 };
+      } else {
+        const raw = await currentCaller().callTool(tool, args);
+        envelope = normalizeEnvelope(raw);
+      }
     } catch (error) {
       envelope = { status: 'error', summary: safeMessage(error), results: [], result_count: 0 };
     } finally {
@@ -346,7 +388,7 @@ export async function callQloo(
     ms: Date.now() - started,
   };
   if (forWho) record.forWho = forWho;
-  return { envelope, record };
+  return skipped ? { envelope, record, skipped: true } : { envelope, record };
 }
 
 /** Whether `qloo mcp` started and has a credential, with the reason when it is not. */
