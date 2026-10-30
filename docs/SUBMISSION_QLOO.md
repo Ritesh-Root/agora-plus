@@ -2,7 +2,7 @@
 
 Copy-ready text for the "Agents, but with taste" entry. Every claim here matches the code; the details are in [QLOO.md](QLOO.md). Fill in the two placeholders before you submit.
 
-**Live demo:** LIVE_URL_PLACEHOLDER (household passcode: PASSCODE_PLACEHOLDER — a fictional family is preloaded)
+**Live demo:** https://agora-plus-295478535981.us-central1.run.app (household passcode: tastecouncil — a fictional family is preloaded)
 
 **Repository:** https://github.com/Ritesh-Root/agora-plus (MIT licence, [LICENSE](../LICENSE))
 
